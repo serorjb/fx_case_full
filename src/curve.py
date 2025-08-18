@@ -12,9 +12,9 @@ from scipy.optimize import OptimizeWarning
 
 warnings.simplefilter("ignore", OptimizeWarning)
 
-DATA_DIR = Path('data/input/FRED')
-RESULTS_DIR = Path('results')
-PARQUET_PATH = Path('data/output/curve.parquet')
+DATA_DIR = Path('../data/input/FRED')
+RESULTS_DIR = Path('../results')
+PARQUET_PATH = Path('../data/output/curve.parquet')
 
 TARGET_TENORS = {
     '1W': 1 / 52, '2W': 2 / 52, '3W': 3 / 52,
@@ -103,7 +103,7 @@ def plot_3d_matplotlib(df):
 
 
 def plot_yield_curves_and_spread(df_discount):
-    os.makedirs("results", exist_ok=True)
+    os.makedirs("../results", exist_ok=True)
     pivot = df_discount.pivot_table(index="date", columns="tenor_years", values="interpolated_rate")
 
     # Plot 1Y-3M spread to show inversion
@@ -130,7 +130,6 @@ def main():
     df_rates = df_1m.join([df_3m, df_6m, df_1y], how='outer').sort_index()
     df_discount = build_discount_curve(df_rates)
     df_discount = df_discount.sort_values(['date', 'tenor'])
-    df_discount.to_csv("data/output/curve.csv", index=False)
     save_parquet(df_discount, PARQUET_PATH)
     plot_yield_curves_and_spread(df_discount)
     plot_3d_matplotlib(df_discount)
