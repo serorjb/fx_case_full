@@ -127,7 +127,7 @@ def main():
     df_3m = load_fred_series(DATA_DIR / "DTB3.csv", "3M")
     df_6m = load_fred_series(DATA_DIR / "DTB6.csv", "6M")
     df_1y = load_fred_series(DATA_DIR / "DTB12.csv", "1Y")
-    df_rates = df_1m.join([df_3m, df_6m, df_1y], how='outer').sort_index().ffill()
+    df_rates = df_1m.join([df_3m, df_6m, df_1y], how='outer').sort_index()
     df_discount = build_discount_curve(df_rates)
     df_discount = df_discount.sort_values(['date', 'tenor'])
     save_parquet(df_discount, PARQUET_PATH)
