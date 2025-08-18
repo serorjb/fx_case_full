@@ -130,6 +130,7 @@ def main():
     df_rates = df_1m.join([df_3m, df_6m, df_1y], how='outer').sort_index()
     df_discount = build_discount_curve(df_rates)
     df_discount = df_discount.sort_values(['date', 'tenor'])
+    df_discount.to_csv("data/output/curve.csv", index=False)
     save_parquet(df_discount, PARQUET_PATH)
     plot_yield_curves_and_spread(df_discount)
     plot_3d_matplotlib(df_discount)

@@ -6,6 +6,9 @@
   <component name="ChangeListManager">
     <list default="true" id="637e7064-2d68-4de1-8449-ece28e37a35d" name="Changes" comment="-">
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/data/output/curve.parquet" beforeDir="false" afterPath="$PROJECT_DIR$/data/output/curve.parquet" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/results/curve.png" beforeDir="false" afterPath="$PROJECT_DIR$/results/curve.png" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/results/curve_inversion.png" beforeDir="false" afterPath="$PROJECT_DIR$/results/curve_inversion.png" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -31,17 +34,17 @@
     <option name="hideEmptyMiddlePackages" value="true" />
     <option name="showLibraryContents" value="true" />
   </component>
-  <component name="PropertiesComponent"><![CDATA[{
-  "keyToString": {
-    "Python.build_rates.executor": "Run",
-    "Python.curve (1).executor": "Run",
-    "Python.discount_curves.executor": "Run",
-    "Python.draft.executor": "Debug",
-    "Python.draft_2.executor": "Debug",
-    "RunOnceActivity.ShowReadmeOnStart": "true",
-    "last_opened_file_path": "C:/Dev/fx_case_full"
+  <component name="PropertiesComponent">{
+  &quot;keyToString&quot;: {
+    &quot;Python.build_rates.executor&quot;: &quot;Run&quot;,
+    &quot;Python.curve (1).executor&quot;: &quot;Run&quot;,
+    &quot;Python.discount_curves.executor&quot;: &quot;Run&quot;,
+    &quot;Python.draft.executor&quot;: &quot;Debug&quot;,
+    &quot;Python.draft_2.executor&quot;: &quot;Debug&quot;,
+    &quot;RunOnceActivity.ShowReadmeOnStart&quot;: &quot;true&quot;,
+    &quot;last_opened_file_path&quot;: &quot;C:/Dev/fx_case_full&quot;
   }
-}]]></component>
+}</component>
   <component name="RecentsManager">
     <key name="CopyFile.RECENT_KEYS">
       <recent name="C:\Dev\fx_case_full" />
@@ -165,7 +168,6 @@
     <recent_temporary>
       <list>
         <item itemvalue="Python.curve (1)" />
-        <item itemvalue="Python.discount_curves" />
         <item itemvalue="Python.draft" />
         <item itemvalue="Python.draft_2" />
       </list>
@@ -196,7 +198,15 @@
       <option name="project" value="LOCAL" />
       <updated>1755338571020</updated>
     </task>
-    <option name="localTasksCounter" value="3" />
+    <task id="LOCAL-00003" summary="-">
+      <option name="closed" value="true" />
+      <created>1755476980029</created>
+      <option name="number" value="00003" />
+      <option name="presentableId" value="LOCAL-00003" />
+      <option name="project" value="LOCAL" />
+      <updated>1755476980029</updated>
+    </task>
+    <option name="localTasksCounter" value="4" />
     <servers />
   </component>
   <component name="VcsManagerConfiguration">
