@@ -7,8 +7,9 @@ import pandas as pd
 
 from config_io import load_config
 from allocator import allocate  # PyPortfolioOpt-backed
-from costs import option_trade_cost, hedge_cost_from_pips
-from pricing_black_gk import black_forward_delta, gk_spot_delta
+from pricing_black_gk import black_forward_delta  # for model delta
+from costs import option_trade_cost, hedge_cost_from_pips  # for costs
+
 
 log = logging.getLogger("run_strategy")
 FREQ = 252
@@ -226,7 +227,7 @@ def main():
     for m in models:
         log.info("[%s] loading priced grid ...", m)
         priced = _load_priced_grid(results_dir, m)
-        sleeves, ew_ret = _simulate_sleeves(priced)
+        sleeves, ew_ret = _simulate_sleeves(priced, cfg)
 
         # Save sleeves (index label ensures later parse)
         sleeves.to_csv(results_dir / f"sleeve_returns_{m}.csv", index_label="date")
