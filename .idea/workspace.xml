@@ -5,24 +5,12 @@
   </component>
   <component name="ChangeListManager">
     <list default="true" id="637e7064-2d68-4de1-8449-ece28e37a35d" name="Changes" comment="-">
-      <change afterPath="$PROJECT_DIR$/config/config.toml" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/src/allocator.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/src/backtest.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/src/config_io.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/src/costs.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/src/data_io.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/src/delta_strike.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/src/forwards.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/src/margin.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/src/pricing_black_gk.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/src/pricing_sabr.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/src/pricing_vgvv.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/src/reporting.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/src/run_backtests.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/src/signal_engine.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/src/smile.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/src/run_strategy.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/curve.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/curve.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/allocator.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/allocator.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/backtest.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/backtest.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/costs.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/costs.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/pricing_black_gk.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/pricing_black_gk.py" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -48,20 +36,21 @@
     <option name="hideEmptyMiddlePackages" value="true" />
     <option name="showLibraryContents" value="true" />
   </component>
-  <component name="PropertiesComponent"><![CDATA[{
-  "keyToString": {
-    "Python.backtest.executor": "Run",
-    "Python.build_rates.executor": "Run",
-    "Python.config_io.executor": "Run",
-    "Python.curve (1).executor": "Run",
-    "Python.discount_curves.executor": "Run",
-    "Python.draft.executor": "Run",
-    "Python.draft_2.executor": "Debug",
-    "Python.run_backtests.executor": "Run",
-    "RunOnceActivity.ShowReadmeOnStart": "true",
-    "last_opened_file_path": "C:/Dev/fx_case_full/src"
+  <component name="PropertiesComponent">{
+  &quot;keyToString&quot;: {
+    &quot;Python.backtest.executor&quot;: &quot;Run&quot;,
+    &quot;Python.build_rates.executor&quot;: &quot;Run&quot;,
+    &quot;Python.config_io.executor&quot;: &quot;Run&quot;,
+    &quot;Python.curve (1).executor&quot;: &quot;Run&quot;,
+    &quot;Python.discount_curves.executor&quot;: &quot;Run&quot;,
+    &quot;Python.draft.executor&quot;: &quot;Run&quot;,
+    &quot;Python.draft_2.executor&quot;: &quot;Debug&quot;,
+    &quot;Python.run_backtests.executor&quot;: &quot;Run&quot;,
+    &quot;Python.run_strategy.executor&quot;: &quot;Run&quot;,
+    &quot;RunOnceActivity.ShowReadmeOnStart&quot;: &quot;true&quot;,
+    &quot;last_opened_file_path&quot;: &quot;C:/Dev/fx_case_full/src&quot;
   }
-}]]></component>
+}</component>
   <component name="RecentsManager">
     <key name="CopyFile.RECENT_KEYS">
       <recent name="C:\Dev\fx_case_full\src" />
@@ -75,7 +64,7 @@
       <recent name="C:\Dev\fx_case_full\data\input" />
     </key>
   </component>
-  <component name="RunManager" selected="Python.run_backtests">
+  <component name="RunManager" selected="Python.run_strategy">
     <configuration name="backtest" type="PythonConfigurationType" factoryName="Python" temporary="true" nameIsGenerated="true">
       <module name="fx_case_full" />
       <option name="ENV_FILES" value="" />
@@ -112,28 +101,6 @@
       <option name="ADD_CONTENT_ROOTS" value="true" />
       <option name="ADD_SOURCE_ROOTS" value="true" />
       <option name="SCRIPT_NAME" value="$PROJECT_DIR$/src/config_io.py" />
-      <option name="PARAMETERS" value="" />
-      <option name="SHOW_COMMAND_LINE" value="false" />
-      <option name="EMULATE_TERMINAL" value="false" />
-      <option name="MODULE_MODE" value="false" />
-      <option name="REDIRECT_INPUT" value="false" />
-      <option name="INPUT_FILE" value="" />
-      <method v="2" />
-    </configuration>
-    <configuration name="curve" type="PythonConfigurationType" factoryName="Python" temporary="true" nameIsGenerated="true">
-      <module name="fx_case_full" />
-      <option name="ENV_FILES" value="" />
-      <option name="INTERPRETER_OPTIONS" value="" />
-      <option name="PARENT_ENVS" value="true" />
-      <envs>
-        <env name="PYTHONUNBUFFERED" value="1" />
-      </envs>
-      <option name="SDK_HOME" value="" />
-      <option name="WORKING_DIRECTORY" value="$PROJECT_DIR$" />
-      <option name="IS_MODULE_SDK" value="true" />
-      <option name="ADD_CONTENT_ROOTS" value="true" />
-      <option name="ADD_SOURCE_ROOTS" value="true" />
-      <option name="SCRIPT_NAME" value="C:\Dev\fx_case_full\src\curve.py" />
       <option name="PARAMETERS" value="" />
       <option name="SHOW_COMMAND_LINE" value="false" />
       <option name="EMULATE_TERMINAL" value="false" />
@@ -186,13 +153,35 @@
       <option name="INPUT_FILE" value="" />
       <method v="2" />
     </configuration>
+    <configuration name="run_strategy" type="PythonConfigurationType" factoryName="Python" temporary="true" nameIsGenerated="true">
+      <module name="fx_case_full" />
+      <option name="ENV_FILES" value="" />
+      <option name="INTERPRETER_OPTIONS" value="" />
+      <option name="PARENT_ENVS" value="true" />
+      <envs>
+        <env name="PYTHONUNBUFFERED" value="1" />
+      </envs>
+      <option name="SDK_HOME" value="" />
+      <option name="WORKING_DIRECTORY" value="$PROJECT_DIR$/src" />
+      <option name="IS_MODULE_SDK" value="true" />
+      <option name="ADD_CONTENT_ROOTS" value="true" />
+      <option name="ADD_SOURCE_ROOTS" value="true" />
+      <option name="SCRIPT_NAME" value="$PROJECT_DIR$/src/run_strategy.py" />
+      <option name="PARAMETERS" value="" />
+      <option name="SHOW_COMMAND_LINE" value="false" />
+      <option name="EMULATE_TERMINAL" value="false" />
+      <option name="MODULE_MODE" value="false" />
+      <option name="REDIRECT_INPUT" value="false" />
+      <option name="INPUT_FILE" value="" />
+      <method v="2" />
+    </configuration>
     <recent_temporary>
       <list>
+        <item itemvalue="Python.run_strategy" />
         <item itemvalue="Python.run_backtests" />
         <item itemvalue="Python.backtest" />
         <item itemvalue="Python.config_io" />
         <item itemvalue="Python.draft" />
-        <item itemvalue="Python.curve (1)" />
       </list>
     </recent_temporary>
   </component>
@@ -237,7 +226,15 @@
       <option name="project" value="LOCAL" />
       <updated>1755498699345</updated>
     </task>
-    <option name="localTasksCounter" value="5" />
+    <task id="LOCAL-00005" summary="-">
+      <option name="closed" value="true" />
+      <created>1755557935504</created>
+      <option name="number" value="00005" />
+      <option name="presentableId" value="LOCAL-00005" />
+      <option name="project" value="LOCAL" />
+      <updated>1755557935504</updated>
+    </task>
+    <option name="localTasksCounter" value="6" />
     <servers />
   </component>
   <component name="VcsManagerConfiguration">

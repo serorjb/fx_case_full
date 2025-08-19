@@ -6,12 +6,13 @@ from config_io import load_config
 import data_io as dio
 from forwards import forward_from_points
 from delta_strike import strike_from_delta
-from pricing_black_gk import black_price
+from pricing_black_gk import black_price, gk_price
 from smile import vols_from_atm_rr_bf
 from pricing_sabr import sabr_vol, calibrate_sabr
 from pricing_vgvv import vgvv_implied_vol
 
 log = logging.getLogger("backtest")
+
 
 def _ensure_datetime_index(df: pd.DataFrame, date_col: str) -> pd.DataFrame:
     if date_col in df.columns:
@@ -22,9 +23,11 @@ def _ensure_datetime_index(df: pd.DataFrame, date_col: str) -> pd.DataFrame:
         raise ValueError("DataFrame needs a DatetimeIndex or column: %s" % date_col)
     return df.sort_index()
 
+
 def _df_for_T(curve_day, T_years):
     i = (curve_day["tenor_years"] - T_years).abs().idxmin()
     return float(curve_day.loc[i, "discount_factor"])
+
 
 def daily_surface_for_pair(pair, row, tenors, day_count):
     out = {}
@@ -52,19 +55,35 @@ def daily_surface_for_pair(pair, row, tenors, day_count):
         }
     return out
 
-def price_by_model(model, F, K, T, DF, vols_bundle, beta=1.0):
-    if model in {"BLACK", "GK"}:
+
+def price_by_model(model, F, K, T, DF, vols_bundle, beta=1.0, call: bool = True):
+    if model == "BLACK":
         sigma = vols_bundle["baseline_vol"]
-        return black_price(F, K, sigma, T, df=DF, call=True), sigma
+        pv = black_price(F, K, sigma, T, df=DF, call=call)
+        return pv, sigma
+
+    elif model == "GK":
+        sigma = vols_bundle["baseline_vol"]
+        S = vols_bundle["S"]  # spot must be present in vols_bundle
+        pv = gk_price(S, K, sigma, T, DF, F, call=call)
+        return pv, sigma
+
     elif model == "SABR":
         p = vols_bundle["sabr_params"]
         sigma = sabr_vol(F, K, T, p["alpha"], p["beta"], p["nu"], p["rho"])
-        return black_price(F, K, sigma, T, df=DF, call=True), sigma
+        pv = black_price(F, K, sigma, T, df=DF, call=call)
+        return pv, sigma
+
     elif model == "VGVV":
-        sigma = vgvv_implied_vol(F, K, T, vols_bundle["anchors"], vols_bundle["anchor_vols"])
-        return black_price(F, K, sigma, T, df=DF, call=True), sigma
+        sigma = vgvv_implied_vol(F, K, T,
+                                 vols_bundle["anchors"],
+                                 vols_bundle["anchor_vols"])
+        pv = black_price(F, K, sigma, T, df=DF, call=call)
+        return pv, sigma
+
     else:
         raise ValueError(f"Unknown model {model}")
+
 
 def run(config_path: str, model_scope=None, outdir=None):
     cfg = load_config(config_path)
@@ -137,6 +156,7 @@ def run(config_path: str, model_scope=None, outdir=None):
                         sabr_params = None
 
                     vols_bundle = {
+                        "S": S,
                         "baseline_vol": baseline_vol,
                         "anchors": anchors,
                         "anchor_vols": anchor_vols,
@@ -162,5 +182,4 @@ def run(config_path: str, model_scope=None, outdir=None):
     if outdir is None:
         outdir = cfg["reporting"]["outdir"]
     Path(outdir).mkdir(parents=True, exist_ok=True)
-    df.to_csv(Path(outdir) / "priced_grid.csv", index=False)
     return df
