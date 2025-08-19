@@ -29,22 +29,115 @@ def _df_for_T(curve_day, T_years):
     return float(curve_day.loc[i, "discount_factor"])
 
 
+# --- Helpers to mitigate data mismatches ---
+
+def _tenor_aliases(t: str) -> list[str]:
+    """Return tenor aliases to try (primary first), to handle 3M vs 90D etc."""
+    t = str(t).upper()
+    mapping = {
+        "1W": ["1W", "7D"],
+        "2W": ["2W", "14D"],
+        "3W": ["3W", "21D"],
+        "1M": ["1M", "30D"],
+        "2M": ["2M", "60D"],
+        "3M": ["3M", "90D"],
+        "6M": ["6M", "180D"],
+        "9M": ["9M", "270D"],
+        "12M": ["12M", "360D", "1Y"],
+    }
+    return mapping.get(t, [t])
+
+
+def _rev_pair(pair: str) -> str:
+    p = pair.upper()
+    if "/" in p:
+        a, b = p.split("/")
+    else:
+        a, b = p[:3], p[3:]
+    return f"{b}{a}" if "/" not in p else f"{b}/{a}"
+
+
+def _first_non_nan_from_aliases(row: pd.Series, getter, pair: str, tenor: str):
+    """Try primary tenor then aliases with provided getter (dio.*_col)."""
+    for ta in _tenor_aliases(tenor):
+        col = getter(pair, ta)
+        val = row.get(col)
+        if pd.notna(val):
+            return val, ta
+    return np.nan, None
+
+
 def daily_surface_for_pair(pair, row, tenors, day_count):
     out = {}
     for t in tenors:
         T = dio.tenor_years(t, day_count)
+
+        # Spot and forward: try direct, else try reverse pair and invert
         S = row.get(dio.spot_col(pair))
-        points = row.get(dio.fwd_points_col(pair, t))
+        points, used_tenor_forw = _first_non_nan_from_aliases(row, dio.fwd_points_col, pair, t)
+
         if pd.isna(S) or pd.isna(points):
+            # Try reversed pair (e.g., CADUSD instead of USDCAD)
+            rev = _rev_pair(pair)
+            S_rev = row.get(dio.spot_col(rev))
+            points_rev, used_tenor_rev = _first_non_nan_from_aliases(row, dio.fwd_points_col, rev, t)
+            if pd.notna(S_rev) and pd.notna(points_rev):
+                try:
+                    F_rev = forward_from_points(S_rev, points_rev)
+                    if isinstance(F_rev, (int, float)) and F_rev > 0 and isinstance(S_rev, (int, float)) and S_rev > 0:
+                        # Invert
+                        S = 1.0 / float(S_rev)
+                        F = 1.0 / float(F_rev)
+                    else:
+                        F = np.nan
+                except Exception:
+                    F = np.nan
+            else:
+                F = np.nan
+        else:
+            F = forward_from_points(S, points)
+
+        if pd.isna(S) or pd.isna(F):
             continue
-        F = forward_from_points(S, points)
         if not (isinstance(F, (int, float)) and F > 0):
             continue
+
+        # Vols (ATM + smile): try aliases; ATM vol assumed invariant under inversion
         atm = row.get(dio.atm_vol_col(pair, t))
+        if pd.isna(atm):
+            # try tenor alias on same pair
+            for ta in _tenor_aliases(t):
+                atm = row.get(dio.atm_vol_col(pair, ta))
+                if pd.notna(atm):
+                    break
+        if pd.isna(atm):
+            # try reverse pair as last resort (ATM vol ~ invariant under inversion)
+            rev = _rev_pair(pair)
+            for ta in _tenor_aliases(t):
+                atm = row.get(dio.atm_vol_col(rev, ta))
+                if pd.notna(atm):
+                    break
+
+        # RR/BF (if missing, we will gracefully fall back to ATM-only elsewhere)
         rr25 = row.get(dio.rr_col(pair, 25, t))
         bf25 = row.get(dio.bf_col(pair, 25, t))
         rr10 = row.get(dio.rr_col(pair, 10, t))
         bf10 = row.get(dio.bf_col(pair, 10, t))
+
+        # Also try aliases for RR/BF if primary missing
+        if pd.isna(rr25) or pd.isna(bf25):
+            for ta in _tenor_aliases(t):
+                rr25 = row.get(dio.rr_col(pair, 25, ta)) if pd.isna(rr25) else rr25
+                bf25 = row.get(dio.bf_col(pair, 25, ta)) if pd.isna(bf25) else bf25
+                if pd.notna(rr25) and pd.notna(bf25):
+                    break
+        if pd.isna(rr10) or pd.isna(bf10):
+            for ta in _tenor_aliases(t):
+                rr10 = row.get(dio.rr_col(pair, 10, ta)) if pd.isna(rr10) else rr10
+                bf10 = row.get(dio.bf_col(pair, 10, ta)) if pd.isna(bf10) else bf10
+                if pd.notna(rr10) and pd.notna(bf10):
+                    break
+
         out[t] = {
             "S": S,
             "F": F,
