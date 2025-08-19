@@ -31,8 +31,8 @@ spot_cost_pips_majors = 1.0
 spot_cost_pips_crosses = 3.0
 
 [costs]
-option_trade_bps_atm = 15
-option_trade_bps_wings = 30
+option_trade_bps_atm = 50
+option_trade_bps_wings = 75
 min_tick_value = 0.0
 
 [margin]
