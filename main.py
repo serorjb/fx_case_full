@@ -227,17 +227,18 @@ def run_complete_analysis():
 
     from backtesting_engine import FXOptionsBacktester, BacktestConfig
 
-    # Configure backtest
+    # Configure backtest for full period with warm-up
+    # Use first year for calibration, then trade the rest
     config = BacktestConfig(
-        start_date=pd.Timestamp("2006-01-01"),
-        end_date=pd.Timestamp("2006-06-30"),  # 6 months for demo
+        start_date=pd.Timestamp("2007-01-01"),  # Start trading after 1 year warm-up
+        end_date=pd.Timestamp("2024-12-31"),    # Use all available data
         initial_capital=1_000_000,
         pairs=None,  # None = auto-detect all pairs
-        max_positions=20,
-        max_position_size=0.02,
-        vol_threshold=0.002,  # Lowered threshold
+        max_positions=50,  # Increase positions
+        max_position_size=0.01,  # 1% per position
+        vol_threshold=0.001,  # Lower threshold - 10bp
         pricing_model="VGVV",
-        calibration_window=20,
+        calibration_window=252,  # 1 year calibration, then expanding up to 5 years
         max_drawdown=0.10  # 10% max drawdown
     )
 

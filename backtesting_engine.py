@@ -153,22 +153,26 @@ class BacktestResults:
         axes[0, 1].set_ylabel('Drawdown (%)')
         axes[0, 1].grid(True)
 
-        # Returns distribution
-        if self.returns:
+        # Returns distribution - check for valid data
+        if self.returns and len(self.returns) > 0:
             returns_df = pd.DataFrame(self.returns).set_index('date')
-            axes[1, 0].hist(returns_df['return'] * 100, bins=50, edgecolor='black')
-            axes[1, 0].set_title('Returns Distribution')
-            axes[1, 0].set_xlabel('Daily Return (%)')
-            axes[1, 0].set_ylabel('Frequency')
-            axes[1, 0].grid(True)
+            # Filter out NaN and infinite values
+            valid_returns = returns_df['return'].replace([np.inf, -np.inf], np.nan).dropna()
+            if len(valid_returns) > 0:
+                axes[1, 0].hist(valid_returns * 100, bins=50, edgecolor='black')
+                axes[1, 0].set_title('Returns Distribution')
+                axes[1, 0].set_xlabel('Daily Return (%)')
+                axes[1, 0].set_ylabel('Frequency')
+                axes[1, 0].grid(True)
 
         # Number of positions over time
-        positions_df = pd.DataFrame(self.positions_history).set_index('date')
-        axes[1, 1].plot(positions_df.index, positions_df['num_positions'])
-        axes[1, 1].set_title('Number of Positions')
-        axes[1, 1].set_xlabel('Date')
-        axes[1, 1].set_ylabel('Count')
-        axes[1, 1].grid(True)
+        if self.positions_history:
+            positions_df = pd.DataFrame(self.positions_history).set_index('date')
+            axes[1, 1].plot(positions_df.index, positions_df['num_positions'])
+            axes[1, 1].set_title('Number of Positions')
+            axes[1, 1].set_xlabel('Date')
+            axes[1, 1].set_ylabel('Count')
+            axes[1, 1].grid(True)
 
         # Greeks over time
         if 'delta' in self.greeks_history:
@@ -205,6 +209,11 @@ class FXOptionsBacktester:
         self.results = BacktestResults()
         self.current_date = config.start_date
         self.spot_hedge = 0.0  # Spot position for delta hedging
+
+        # Margin tracking
+        self.margin_used = 0.0
+        self.margin_available = config.initial_capital * 0.5  # 50% margin limit
+        self.margin_rate = 0.02  # Cost of margin
 
     def initialize(self):
         """Initialize the backtester"""
@@ -377,15 +386,21 @@ class FXOptionsBacktester:
 
     def run_backtest(self):
         """
-        Run the backtest
+        Run the backtest with improved daily trading logic
         """
         print(f"Starting backtest from {self.config.start_date} to {self.config.end_date}")
 
         # Get date range
         dates = pd.date_range(self.config.start_date, self.config.end_date, freq='B')
 
+        # Warm-up period for calibration (use data before start date)
+        warm_up_start = self.config.start_date - pd.Timedelta(days=365)
+
         for i, date in enumerate(dates):
             self.current_date = date
+
+            # Collect all opportunities across all pairs
+            all_signals = []
 
             # Process each pair
             for pair in self.config.pairs:
@@ -396,56 +411,125 @@ class FXOptionsBacktester:
 
                 spot = vol_data.spot
 
-                # Update existing positions
-                market_vols = {}  # Simplified - would extract from vol_data
+                # Update existing positions for this pair
+                market_vols = self._extract_market_vols(vol_data)
                 self.strategy.update_positions(spot, date, market_vols, self.bs_model)
 
-                # Calibrate model periodically
-                if i % self.config.calibration_window == 0:
+                # Calibrate model periodically or use expanding window
+                should_calibrate = (i % self.config.calibration_window == 0) or (i < self.config.calibration_window)
+
+                if should_calibrate:
+                    # Use expanding window up to 5 years
+                    calibration_start = max(
+                        warm_up_start,
+                        date - pd.Timedelta(days=5*365)
+                    )
+
                     model_params = self.calibrate_model(pair, date)
 
                     if model_params:
                         # Generate model surface
                         model_surface = self.generate_model_surface(model_params, vol_data)
 
-                        # Extract market surface (simplified)
-                        market_surface = {}
-                        for tenor in FXDataLoader.TENOR_MAP.keys():
-                            if tenor in vol_data.atm_vols:
-                                market_surface[tenor] = {
-                                    'vol': vol_data.atm_vols[tenor]
-                                }
+                        # Extract market surface
+                        market_surface = self._extract_market_surface(vol_data)
 
-                        # Identify trading opportunities
+                        # Identify trading opportunities for this pair
                         signals = self.strategy.identify_opportunities(
                             market_surface, model_surface, spot, date
                         )
 
-                        # Execute top signals (respecting position limits)
-                        for signal in signals[:3]:  # Execute top 3 signals
-                            if len(self.strategy.positions) < self.config.max_positions:
-                                position = self.strategy.execute_signal(
-                                    signal, spot, date, self.bs_model
-                                )
+                        # Add pair info to signals
+                        for signal in signals:
+                            signal.pair = pair
+                            all_signals.append(signal)
 
-                                if position:
-                                    # Record trade
-                                    self.results.trades.append({
-                                        'date': date,
-                                        'pair': pair,
-                                        'strike': position.strike,
-                                        'type': position.option_type,
-                                        'size': position.position_size,
-                                        'entry_price': position.entry_price
-                                    })
+            # Sort all signals by expected edge (best opportunities first)
+            all_signals.sort(key=lambda x: abs(x.expected_edge), reverse=True)
+
+            # Execute best signals across all pairs (respecting position limits)
+            signals_to_execute = min(
+                len(all_signals),
+                self.config.max_positions - len([p for p in self.strategy.positions if not p.is_closed])
+            )
+
+            for signal in all_signals[:signals_to_execute]:
+                # Check margin availability
+                required_margin = self._calculate_required_margin(signal)
+
+                if self.margin_used + required_margin <= self.margin_available:
+                    # Get rates for this signal
+                    vol_data = self.data_loader.get_volatility_surface(signal.pair, date)
+                    if vol_data:
+                        rate_extractor = RateExtractor()
+                        usd_rate = self.data_loader.rf_curve.get_rate(date, 30)
+                        implied_rates = rate_extractor.extract_rates_from_forwards(
+                            vol_data.spot, vol_data.forwards, usd_rate
+                        )
+
+                        # Get rates for the signal's tenor
+                        if signal.tenor in implied_rates:
+                            r_d, r_f = implied_rates[signal.tenor]
+                        else:
+                            T = self._tenor_to_years(signal.tenor)
+                            r_d, r_f = rate_extractor.interpolate_rate_curve(implied_rates, T)
+
+                        # Execute signal
+                        position = self.strategy.execute_signal(
+                            signal, vol_data.spot, date, self.bs_model, r_d, r_f
+                        )
+
+                        if position:
+                            # Update margin
+                            self.margin_used += required_margin
+
+                            # Record trade
+                            self.results.trades.append({
+                                'date': date,
+                                'pair': signal.pair,
+                                'strike': position.strike,
+                                'type': position.option_type,
+                                'size': position.position_size,
+                                'entry_price': position.entry_price,
+                                'margin_used': required_margin
+                            })
 
             # Calculate portfolio Greeks
-            greeks = self.strategy.calculate_portfolio_greeks(spot, date, self.bs_model)
+            if self.strategy.positions:
+                # Aggregate Greeks across all positions
+                total_greeks = {'delta': 0, 'gamma': 0, 'vega': 0, 'theta': 0}
 
-            # Delta hedging
-            if self.strategy.target_delta_neutral:
-                hedge_required = self.strategy.hedge_delta(greeks, spot)
+                for pair in self.config.pairs:
+                    vol_data = self.data_loader.get_volatility_surface(pair, date)
+                    if vol_data:
+                        pair_positions = [p for p in self.strategy.positions
+                                        if p.pair == pair and not p.is_closed]
+                        if pair_positions:
+                            pair_greeks = self.strategy.calculate_portfolio_greeks(
+                                vol_data.spot, date, self.bs_model
+                            )
+                            for key in total_greeks:
+                                total_greeks[key] += pair_greeks.get(key, 0)
+
+                greeks = total_greeks
+            else:
+                greeks = {'delta': 0, 'gamma': 0, 'vega': 0, 'theta': 0}
+
+            # Delta hedging if needed
+            if self.strategy.target_delta_neutral and abs(greeks['delta']) > 1000:
+                hedge_required = self.strategy.hedge_delta(greeks, 1.0)  # Use average spot
                 self.spot_hedge = hedge_required
+
+            # Update margin cost
+            margin_cost = self.margin_used * self.margin_rate / 365
+            self.strategy.current_capital -= margin_cost
+
+            # Handle expired positions and release margin
+            self._handle_expirations(date)
+
+            # Ensure capital doesn't go negative
+            if self.strategy.current_capital < 0:
+                self.strategy.current_capital = 1.0  # Minimum capital
 
             # Record snapshot
             self.results.add_snapshot(
@@ -459,7 +543,7 @@ class FXOptionsBacktester:
             if len(self.results.equity_curve) > 1:
                 peak = max(e['equity'] for e in self.results.equity_curve)
                 current = self.strategy.current_capital
-                drawdown = (peak - current) / peak
+                drawdown = (peak - current) / peak if peak > 0 else 0
 
                 if drawdown > self.config.max_drawdown:
                     print(f"Max drawdown breached on {date}: {drawdown:.2%}")
@@ -467,14 +551,17 @@ class FXOptionsBacktester:
                     for i in range(len(self.strategy.positions)):
                         if not self.strategy.positions[i].is_closed:
                             self.strategy.close_position(
-                                i, spot, date, "max_drawdown", self.bs_model
+                                i, 1.0, date, "max_drawdown", self.bs_model
                             )
+                    # Reset margin
+                    self.margin_used = 0
 
             # Progress update
             if i % 50 == 0:
                 print(f"Processed {i}/{len(dates)} days, "
                       f"Capital: ${self.strategy.current_capital:,.0f}, "
-                      f"Positions: {len([p for p in self.strategy.positions if not p.is_closed])}")
+                      f"Positions: {len([p for p in self.strategy.positions if not p.is_closed])}, "
+                      f"Margin Used: ${self.margin_used:,.0f}")
 
         # Calculate final metrics
         self.results.calculate_metrics()
@@ -484,6 +571,63 @@ class FXOptionsBacktester:
         print("="*50)
 
         return self.results
+
+    def _extract_market_vols(self, vol_data) -> Dict:
+        """Extract market volatilities from vol data"""
+        market_vols = {}
+        for tenor in vol_data.atm_vols:
+            market_vols[tenor] = vol_data.atm_vols[tenor]
+        return market_vols
+
+    def _extract_market_surface(self, vol_data) -> Dict:
+        """Extract market surface from vol data"""
+        surface = {}
+        for tenor in vol_data.atm_vols:
+            surface[tenor] = {'vol': vol_data.atm_vols[tenor]}
+        return surface
+
+    def _calculate_required_margin(self, signal) -> float:
+        """Calculate required margin for a position"""
+        # Simple margin calculation - 10% of notional
+        notional = abs(signal.recommended_size) * self.strategy.current_capital
+        return notional * 0.10
+
+    def _tenor_to_years(self, tenor: str) -> float:
+        """Convert tenor to years"""
+        tenor_map = {
+            '1W': 7/365, '2W': 14/365, '3W': 21/365, '1M': 30/365,
+            '2M': 60/365, '3M': 90/365, '4M': 120/365, '6M': 180/365,
+            '9M': 270/365, '12M': 1.0
+        }
+        return tenor_map.get(tenor, 30/365)
+
+    def _handle_expirations(self, date):
+        """Handle expired positions and release margin"""
+        for position in self.strategy.positions:
+            if not position.is_closed and position.expiry <= date:
+                # Position expired
+                position.is_closed = True
+                position.close_date = date
+                position.close_reason = "expired"
+
+                # Calculate final P&L (intrinsic value at expiry)
+                if position.option_type == 'call':
+                    intrinsic = max(position.entry_spot - position.strike, 0)
+                else:
+                    intrinsic = max(position.strike - position.entry_spot, 0)
+
+                position.close_price = intrinsic
+                position.pnl = (intrinsic - position.entry_price) * position.position_size * 100
+
+                # Update capital
+                self.strategy.current_capital += position.pnl
+
+                # Release margin
+                self.margin_used = max(0, self.margin_used - abs(position.position_size) *
+                                      self.strategy.current_capital * 0.01)
+
+                # Move to closed positions
+                self.strategy.closed_positions.append(position)
 
     def print_summary(self):
         """Print backtest summary"""
