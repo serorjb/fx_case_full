@@ -132,11 +132,11 @@ def run_complete_analysis():
 
                 # Compare model fits
                 model_vols_vgvv = vgvv.get_smile(vgvv_params, strikes)
-                model_vols_sabr = [sabr.sabr_vol(k, sabr_params['alpha'],
-                                                sabr_params['beta'],
-                                                sabr_params['rho'],
-                                                sabr_params['nu'])
-                                  for k in strikes]
+                model_vols_sabr = np.array([sabr.sabr_vol(k, sabr_params['alpha'],
+                                                         sabr_params['beta'],
+                                                         sabr_params['rho'],
+                                                         sabr_params['nu'])
+                                           for k in strikes])
 
                 # Plot comparison
                 plt.figure(figsize=(10, 6))
@@ -164,7 +164,7 @@ def run_complete_analysis():
     strategy = VolatilityArbitrageStrategy(
         initial_capital=1_000_000,
         max_position_size=0.02,
-        vol_threshold=0.005  # 0.5% threshold
+        vol_threshold=0.002  # Lowered from 0.005 to 0.2% threshold
     )
 
     # Generate sample signals
@@ -174,8 +174,14 @@ def run_complete_analysis():
     for tenor in ["1M", "3M", "6M"]:
         if tenor in vol_data.atm_vols:
             market_surface[tenor] = {'vol': vol_data.atm_vols[tenor]}
-            # Simulate model thinks vol should be lower
-            model_surface[tenor] = {'vol': vol_data.atm_vols[tenor] * 0.95}
+            # Create more realistic model differences
+            # Model might think short-term vol is overpriced, long-term underpriced
+            if tenor == "1M":
+                model_surface[tenor] = {'vol': vol_data.atm_vols[tenor] * 0.95}  # 5% lower
+            elif tenor == "3M":
+                model_surface[tenor] = {'vol': vol_data.atm_vols[tenor] * 0.98}  # 2% lower
+            else:
+                model_surface[tenor] = {'vol': vol_data.atm_vols[tenor] * 1.02}  # 2% higher
 
     signals = strategy.identify_opportunities(
         market_surface, model_surface, vol_data.spot, sample_date
@@ -206,7 +212,7 @@ def run_complete_analysis():
         pairs=["AUDNZD"],
         max_positions=20,
         max_position_size=0.02,
-        vol_threshold=0.005,
+        vol_threshold=0.002,  # Lowered threshold
         pricing_model="VGVV",
         calibration_window=20,
         max_drawdown=0.10  # 10% max drawdown

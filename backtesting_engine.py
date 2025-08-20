@@ -10,7 +10,6 @@ from dataclasses import dataclass, field
 import matplotlib.pyplot as plt
 from collections import defaultdict
 import warnings
-
 warnings.filterwarnings('ignore')
 
 # Import our modules
@@ -60,7 +59,7 @@ class BacktestResults:
         self.metrics = {}
 
     def add_snapshot(self, date: pd.Timestamp, equity: float,
-                     positions: List, greeks: Dict):
+                    positions: List, greeks: Dict):
         """Add a snapshot of the portfolio state"""
         self.equity_curve.append({'date': date, 'equity': equity})
 
@@ -88,12 +87,12 @@ class BacktestResults:
 
         # Basic metrics
         total_return = (equity_df['equity'].iloc[-1] /
-                        equity_df['equity'].iloc[0] - 1)
+                       equity_df['equity'].iloc[0] - 1)
 
         # Annualized metrics
         days = (returns_df.index[-1] - returns_df.index[0]).days
         years = days / 365
-        ann_return = (1 + total_return) ** (1 / years) - 1
+        ann_return = (1 + total_return) ** (1/years) - 1
         ann_vol = returns_df['return'].std() * np.sqrt(252)
 
         # Sharpe ratio
@@ -148,7 +147,7 @@ class BacktestResults:
         cummax = equity_df['equity'].cummax()
         drawdown = (equity_df['equity'] - cummax) / cummax * 100
         axes[0, 1].fill_between(drawdown.index, drawdown.values, 0,
-                                color='red', alpha=0.3)
+                               color='red', alpha=0.3)
         axes[0, 1].set_title('Drawdown')
         axes[0, 1].set_xlabel('Date')
         axes[0, 1].set_ylabel('Drawdown (%)')
@@ -331,10 +330,10 @@ class FXOptionsBacktester:
                 elif self.config.pricing_model == "SABR":
                     sabr = SABRModel(forward, T)
                     model_vols = [sabr.sabr_vol(k, model_params['alpha'],
-                                                model_params['beta'],
-                                                model_params['rho'],
-                                                model_params['nu'])
-                                  for k in strikes]
+                                               model_params['beta'],
+                                               model_params['rho'],
+                                               model_params['nu'])
+                                 for k in strikes]
                 else:
                     model_vols = [model_params.get('sigma_atm', 0.10)] * len(strikes)
 
@@ -450,9 +449,9 @@ class FXOptionsBacktester:
         # Calculate final metrics
         self.results.calculate_metrics()
 
-        print("\n" + "=" * 50)
+        print("\n" + "="*50)
         print("BACKTEST COMPLETE")
-        print("=" * 50)
+        print("="*50)
 
         return self.results
 

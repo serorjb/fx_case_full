@@ -102,61 +102,107 @@ class VolatilityArbitrageStrategy:
             market_data = market_surface[tenor]
             model_data = model_surface[tenor]
 
-            # Compare volatilities at different strikes
-            for strike_pct in [0.90, 0.95, 1.00, 1.05, 1.10]:
-                strike = spot * strike_pct
+            # Get market and model vols
+            market_vol = market_data.get('vol', 0)
+            model_vol = model_data.get('vol', 0)
 
-                # Get market and model vols (simplified - would interpolate in practice)
-                market_vol = market_data.get('vol', 0.10)  # Placeholder
-                model_vol = model_data.get('vol', 0.10)    # Placeholder
+            if market_vol == 0 or model_vol == 0:
+                continue
 
-                vol_diff = market_vol - model_vol
+            # Calculate vol difference
+            vol_diff = market_vol - model_vol
 
-                # Check if difference is significant
-                if abs(vol_diff) > self.vol_threshold:
-                    # Determine signal type
-                    if vol_diff > self.vol_threshold:
-                        signal_type = SignalType.OVERPRICED
-                        option_type = 'put' if strike < spot else 'call'
-                        recommended_size = -1  # Short
-                    elif vol_diff < -self.vol_threshold:
-                        signal_type = SignalType.UNDERPRICED
-                        option_type = 'put' if strike < spot else 'call'
-                        recommended_size = 1  # Long
-                    else:
-                        continue
+            # Check if difference is significant (use absolute value for threshold check)
+            if abs(vol_diff) > self.vol_threshold:
+                # Determine signal type and option to trade
+                if vol_diff > self.vol_threshold:
+                    # Market vol > Model vol: Sell volatility
+                    signal_type = SignalType.OVERPRICED
+                    recommended_size = -1  # Short
+                else:
+                    # Market vol < Model vol: Buy volatility
+                    signal_type = SignalType.UNDERPRICED
+                    recommended_size = 1  # Long
 
-                    # Calculate expected edge (simplified)
-                    expected_edge = abs(vol_diff) * 0.5  # Assume 50% mean reversion
+                # For ATM options, we'll trade straddles
+                # For OTM options, we'll trade the appropriate single option
+                strike = spot  # ATM strike
+                option_type = 'straddle' if abs(strike - spot) / spot < 0.01 else 'call'
 
-                    # Calculate confidence based on vol difference magnitude
-                    confidence = min(abs(vol_diff) / (self.vol_threshold * 3), 1.0)
+                # Calculate expected edge
+                expected_edge = abs(vol_diff) * 0.5  # Assume 50% mean reversion
 
-                    # Adjust size based on confidence
-                    recommended_size *= confidence * self.max_position_size
+                # Calculate confidence based on vol difference magnitude
+                confidence = min(abs(vol_diff) / (self.vol_threshold * 3), 1.0)
 
-                    # Create signal
-                    signal = TradingSignal(
-                        pair="AUDNZD",  # Placeholder
-                        strike=strike,
-                        tenor=tenor,
-                        expiry=date + pd.Timedelta(days=30),  # Simplified
-                        option_type=option_type,
-                        signal_type=signal_type,
-                        market_vol=market_vol,
-                        model_vol=model_vol,
-                        vol_diff=vol_diff,
-                        expected_edge=expected_edge,
-                        confidence=confidence,
-                        recommended_size=recommended_size
-                    )
+                # Adjust size based on confidence
+                recommended_size *= confidence * self.max_position_size
 
-                    signals.append(signal)
+                # Create signal
+                signal = TradingSignal(
+                    pair="AUDNZD",
+                    strike=strike,
+                    tenor=tenor,
+                    expiry=date + pd.Timedelta(days=self._tenor_to_days(tenor)),
+                    option_type=option_type,
+                    signal_type=signal_type,
+                    market_vol=market_vol,
+                    model_vol=model_vol,
+                    vol_diff=vol_diff,
+                    expected_edge=expected_edge,
+                    confidence=confidence,
+                    recommended_size=recommended_size
+                )
+
+                signals.append(signal)
+
+            # Also check for relative value opportunities across strikes
+            if 'strikes' in model_data and 'vols' in model_data:
+                model_strikes = model_data['strikes']
+                model_vols_array = model_data['vols']
+
+                # Sample a few strike points
+                for i, strike in enumerate(model_strikes[::2]):  # Check every other strike
+                    if i < len(model_vols_array):
+                        model_strike_vol = model_vols_array[i]
+                        # Estimate market vol at this strike (simplified)
+                        strike_moneyness = strike / spot
+                        market_strike_vol = market_vol * (1 + 0.1 * (strike_moneyness - 1))
+
+                        vol_diff_strike = market_strike_vol - model_strike_vol
+
+                        if abs(vol_diff_strike) > self.vol_threshold * 0.75:  # Lower threshold for individual strikes
+                            signal_type = SignalType.OVERPRICED if vol_diff_strike > 0 else SignalType.UNDERPRICED
+                            option_type = 'put' if strike < spot else 'call'
+
+                            signal = TradingSignal(
+                                pair="AUDNZD",
+                                strike=strike,
+                                tenor=tenor,
+                                expiry=date + pd.Timedelta(days=self._tenor_to_days(tenor)),
+                                option_type=option_type,
+                                signal_type=signal_type,
+                                market_vol=market_strike_vol,
+                                model_vol=model_strike_vol,
+                                vol_diff=vol_diff_strike,
+                                expected_edge=abs(vol_diff_strike) * 0.4,
+                                confidence=min(abs(vol_diff_strike) / (self.vol_threshold * 2), 1.0),
+                                recommended_size=np.sign(-vol_diff_strike) * self.max_position_size * 0.5
+                            )
+                            signals.append(signal)
 
         # Sort by expected edge
         signals.sort(key=lambda x: abs(x.expected_edge), reverse=True)
 
         return signals[:10]  # Return top 10 opportunities
+
+    def _tenor_to_days(self, tenor: str) -> int:
+        """Convert tenor string to days"""
+        tenor_map = {
+            '1W': 7, '2W': 14, '3W': 21, '1M': 30, '2M': 60,
+            '3M': 90, '4M': 120, '6M': 180, '9M': 270, '12M': 365
+        }
+        return tenor_map.get(tenor, 30)
 
     def execute_signal(self,
                        signal: TradingSignal,

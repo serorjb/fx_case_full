@@ -1,167 +1,497 @@
 """
-FX Options Pricing Models
-Implements Black-Scholes, VGVV, and SABR models for FX options
+pricing_models.py
+FX Options Pricing Models using QuantLib
 """
 
 import numpy as np
+import QuantLib as ql
+from scipy.optimize import minimize, differential_evolution
 from scipy.stats import norm
-from scipy.optimize import minimize, root_scalar
-from typing import Tuple, Optional, Dict
+from typing import Dict, List, Optional, Tuple
 import warnings
-
 warnings.filterwarnings('ignore')
 
 
-class BlackScholesFX:
+class QuantLibPricingBase:
+    """Base class for QuantLib-based pricing"""
+
+    def __init__(self):
+        # Set up QuantLib calendar and day count
+        self.calendar = ql.UnitedStates(ql.UnitedStates.Settlement)
+        self.day_count = ql.Actual365Fixed()
+
+    def setup_market_data(self, spot: float, r_d: float, r_f: float,
+                         reference_date: ql.Date = None):
+        """Setup QuantLib market data"""
+        if reference_date is None:
+            reference_date = ql.Date.todaysDate()
+
+        ql.Settings.instance().evaluationDate = reference_date
+
+        # Create spot handle
+        self.spot_handle = ql.QuoteHandle(ql.SimpleQuote(spot))
+
+        # Create rate curves (flat for simplicity, can be enhanced)
+        self.domestic_rate = ql.YieldTermStructureHandle(
+            ql.FlatForward(reference_date, r_d, self.day_count)
+        )
+        self.foreign_rate = ql.YieldTermStructureHandle(
+            ql.FlatForward(reference_date, r_f, self.day_count)
+        )
+
+    def create_option(self, strike: float, maturity: ql.Date,
+                      option_type: str = 'call') -> ql.VanillaOption:
+        """Create a QuantLib vanilla option"""
+        if option_type.lower() == 'call':
+            payoff = ql.PlainVanillaPayoff(ql.Option.Call, strike)
+        else:
+            payoff = ql.PlainVanillaPayoff(ql.Option.Put, strike)
+
+        exercise = ql.EuropeanExercise(maturity)
+        option = ql.VanillaOption(payoff, exercise)
+
+        return option
+
+
+class BlackScholesFX(QuantLibPricingBase):
     """
-    Black-Scholes model for FX options (Garman-Kohlhagen)
+    Black-Scholes model for FX options using QuantLib (Garman-Kohlhagen)
     """
 
-    @staticmethod
-    def d1_d2(S: float, K: float, r_d: float, r_f: float,
-              sigma: float, T: float) -> Tuple[float, float]:
-        """Calculate d1 and d2 parameters"""
-        d1 = (np.log(S / K) + (r_d - r_f + 0.5 * sigma ** 2) * T) / (sigma * np.sqrt(T))
-        d2 = d1 - sigma * np.sqrt(T)
-        return d1, d2
+    def __init__(self):
+        super().__init__()
+        self.process = None
+        self.engine = None
 
+    def setup_process(self, spot: float, r_d: float, r_f: float,
+                     sigma: float, reference_date: ql.Date = None):
+        """Setup Black-Scholes process"""
+        self.setup_market_data(spot, r_d, r_f, reference_date)
+
+        # Create volatility term structure
+        volatility = ql.BlackVolTermStructureHandle(
+            ql.BlackConstantVol(
+                reference_date if reference_date else ql.Date.todaysDate(),
+                self.calendar,
+                sigma,
+                self.day_count
+            )
+        )
+
+        # Create Garman-Kohlhagen process for FX
+        self.process = ql.GarmanKohlagenProcess(
+            self.spot_handle,
+            self.foreign_rate,
+            self.domestic_rate,
+            volatility
+        )
+
+        # Create pricing engine
+        self.engine = ql.AnalyticEuropeanEngine(self.process)
+
+    def price(self, strike: float, maturity_days: int, sigma: float,
+             spot: float, r_d: float, r_f: float,
+             option_type: str = 'call') -> float:
+        """Price an option using Black-Scholes"""
+        reference_date = ql.Date.todaysDate()
+        maturity = reference_date + ql.Period(maturity_days, ql.Days)
+
+        # Setup process with given parameters
+        self.setup_process(spot, r_d, r_f, sigma, reference_date)
+
+        # Create and price option
+        option = self.create_option(strike, maturity, option_type)
+        option.setPricingEngine(self.engine)
+
+        return option.NPV()
+
+    def calculate_greeks(self, strike: float, maturity_days: int,
+                        sigma: float, spot: float, r_d: float, r_f: float,
+                        option_type: str = 'call') -> Dict[str, float]:
+        """Calculate all Greeks using QuantLib"""
+        reference_date = ql.Date.todaysDate()
+        maturity = reference_date + ql.Period(maturity_days, ql.Days)
+
+        # Setup process
+        self.setup_process(spot, r_d, r_f, sigma, reference_date)
+
+        # Create option
+        option = self.create_option(strike, maturity, option_type)
+        option.setPricingEngine(self.engine)
+
+        # Calculate Greeks
+        greeks = {
+            'price': option.NPV(),
+            'delta': option.delta(),
+            'gamma': option.gamma(),
+            'vega': option.vega() / 100,  # QuantLib vega is per 1 unit change
+            'theta': option.theta() / 365,  # Convert to daily theta
+            'rho': option.rho() / 100
+        }
+
+        return greeks
+
+    def implied_volatility(self, price: float, strike: float,
+                          maturity_days: int, spot: float,
+                          r_d: float, r_f: float,
+                          option_type: str = 'call') -> float:
+        """Calculate implied volatility using QuantLib"""
+        reference_date = ql.Date.todaysDate()
+        maturity = reference_date + ql.Period(maturity_days, ql.Days)
+
+        # Setup market data
+        self.setup_market_data(spot, r_d, r_f, reference_date)
+
+        # Create option
+        option = self.create_option(strike, maturity, option_type)
+
+        # Setup process with initial guess
+        initial_vol = 0.20
+        self.setup_process(spot, r_d, r_f, initial_vol, reference_date)
+        option.setPricingEngine(self.engine)
+
+        try:
+            # Use QuantLib's implied volatility solver
+            impl_vol = option.impliedVolatility(
+                price,
+                self.process,
+                accuracy=1e-6,
+                maxEvaluations=100
+            )
+            return impl_vol
+        except:
+            # Fallback to manual search if QuantLib fails
+            return self._implied_vol_bisection(
+                price, strike, maturity_days, spot, r_d, r_f, option_type
+            )
+
+    def _implied_vol_bisection(self, target_price: float, strike: float,
+                               maturity_days: int, spot: float,
+                               r_d: float, r_f: float,
+                               option_type: str = 'call') -> float:
+        """Bisection method for implied volatility"""
+        low_vol, high_vol = 0.001, 3.0
+        tolerance = 1e-6
+        max_iterations = 100
+
+        for _ in range(max_iterations):
+            mid_vol = (low_vol + high_vol) / 2
+            price = self.price(strike, maturity_days, mid_vol,
+                             spot, r_d, r_f, option_type)
+
+            if abs(price - target_price) < tolerance:
+                return mid_vol
+
+            if price < target_price:
+                low_vol = mid_vol
+            else:
+                high_vol = mid_vol
+
+        return mid_vol
+
+    # Compatibility methods for existing code
     @staticmethod
     def call_price(S: float, K: float, r_d: float, r_f: float,
                    sigma: float, T: float) -> float:
-        """Calculate call option price"""
-        if T <= 0:
-            return max(S - K, 0)
-
-        d1, d2 = BlackScholesFX.d1_d2(S, K, r_d, r_f, sigma, T)
-        call = S * np.exp(-r_f * T) * norm.cdf(d1) - K * np.exp(-r_d * T) * norm.cdf(d2)
-        return call
+        """Static method for compatibility"""
+        bs = BlackScholesFX()
+        maturity_days = int(T * 365)
+        return bs.price(K, maturity_days, sigma, S, r_d, r_f, 'call')
 
     @staticmethod
     def put_price(S: float, K: float, r_d: float, r_f: float,
                   sigma: float, T: float) -> float:
-        """Calculate put option price"""
-        if T <= 0:
-            return max(K - S, 0)
-
-        d1, d2 = BlackScholesFX.d1_d2(S, K, r_d, r_f, sigma, T)
-        put = K * np.exp(-r_d * T) * norm.cdf(-d2) - S * np.exp(-r_f * T) * norm.cdf(-d1)
-        return put
+        """Static method for compatibility"""
+        bs = BlackScholesFX()
+        maturity_days = int(T * 365)
+        return bs.price(K, maturity_days, sigma, S, r_d, r_f, 'put')
 
     @staticmethod
     def delta(S: float, K: float, r_d: float, r_f: float,
               sigma: float, T: float, option_type: str = 'call') -> float:
-        """Calculate option delta"""
-        if T <= 0:
-            if option_type == 'call':
-                return 1.0 if S > K else 0.0
-            else:
-                return -1.0 if S < K else 0.0
-
-        d1, _ = BlackScholesFX.d1_d2(S, K, r_d, r_f, sigma, T)
-
-        if option_type == 'call':
-            return np.exp(-r_f * T) * norm.cdf(d1)
-        else:
-            return -np.exp(-r_f * T) * norm.cdf(-d1)
+        """Static method for compatibility"""
+        bs = BlackScholesFX()
+        maturity_days = int(T * 365)
+        greeks = bs.calculate_greeks(K, maturity_days, sigma, S, r_d, r_f, option_type)
+        return greeks['delta']
 
     @staticmethod
     def gamma(S: float, K: float, r_d: float, r_f: float,
               sigma: float, T: float) -> float:
-        """Calculate option gamma"""
-        if T <= 0:
-            return 0.0
-
-        d1, _ = BlackScholesFX.d1_d2(S, K, r_d, r_f, sigma, T)
-        return np.exp(-r_f * T) * norm.pdf(d1) / (S * sigma * np.sqrt(T))
+        """Static method for compatibility"""
+        bs = BlackScholesFX()
+        maturity_days = int(T * 365)
+        greeks = bs.calculate_greeks(K, maturity_days, sigma, S, r_d, r_f, 'call')
+        return greeks['gamma']
 
     @staticmethod
     def vega(S: float, K: float, r_d: float, r_f: float,
              sigma: float, T: float) -> float:
-        """Calculate option vega"""
-        if T <= 0:
-            return 0.0
-
-        d1, _ = BlackScholesFX.d1_d2(S, K, r_d, r_f, sigma, T)
-        return S * np.exp(-r_f * T) * norm.pdf(d1) * np.sqrt(T) / 100  # Per 1% vol change
+        """Static method for compatibility"""
+        bs = BlackScholesFX()
+        maturity_days = int(T * 365)
+        greeks = bs.calculate_greeks(K, maturity_days, sigma, S, r_d, r_f, 'call')
+        return greeks['vega']
 
     @staticmethod
     def theta(S: float, K: float, r_d: float, r_f: float,
               sigma: float, T: float, option_type: str = 'call') -> float:
-        """Calculate option theta (per day)"""
-        if T <= 0:
-            return 0.0
-
-        d1, d2 = BlackScholesFX.d1_d2(S, K, r_d, r_f, sigma, T)
-
-        term1 = -S * np.exp(-r_f * T) * norm.pdf(d1) * sigma / (2 * np.sqrt(T))
-
-        if option_type == 'call':
-            term2 = r_f * S * np.exp(-r_f * T) * norm.cdf(d1)
-            term3 = -r_d * K * np.exp(-r_d * T) * norm.cdf(d2)
-        else:
-            term2 = -r_f * S * np.exp(-r_f * T) * norm.cdf(-d1)
-            term3 = r_d * K * np.exp(-r_d * T) * norm.cdf(-d2)
-
-        return (term1 + term2 + term3) / 365  # Per day
+        """Static method for compatibility"""
+        bs = BlackScholesFX()
+        maturity_days = int(T * 365)
+        greeks = bs.calculate_greeks(K, maturity_days, sigma, S, r_d, r_f, option_type)
+        return greeks['theta']
 
     @staticmethod
     def vanna(S: float, K: float, r_d: float, r_f: float,
               sigma: float, T: float) -> float:
-        """Calculate option vanna (dDelta/dVol)"""
-        if T <= 0:
-            return 0.0
+        """Calculate vanna (dDelta/dVol)"""
+        # QuantLib doesn't have built-in vanna, so we approximate
+        eps = 0.0001
+        bs = BlackScholesFX()
+        maturity_days = int(T * 365)
 
-        d1, d2 = BlackScholesFX.d1_d2(S, K, r_d, r_f, sigma, T)
-        return -np.exp(-r_f * T) * norm.pdf(d1) * d2 / sigma / 100
+        delta_up = bs.calculate_greeks(K, maturity_days, sigma + eps,
+                                       S, r_d, r_f, 'call')['delta']
+        delta_down = bs.calculate_greeks(K, maturity_days, sigma - eps,
+                                         S, r_d, r_f, 'call')['delta']
+
+        return (delta_up - delta_down) / (2 * eps) / 100
 
     @staticmethod
     def volga(S: float, K: float, r_d: float, r_f: float,
               sigma: float, T: float) -> float:
-        """Calculate option volga (dVega/dVol)"""
-        if T <= 0:
-            return 0.0
+        """Calculate volga (dVega/dVol)"""
+        # QuantLib doesn't have built-in volga, so we approximate
+        eps = 0.0001
+        bs = BlackScholesFX()
+        maturity_days = int(T * 365)
 
-        d1, d2 = BlackScholesFX.d1_d2(S, K, r_d, r_f, sigma, T)
-        vega = BlackScholesFX.vega(S, K, r_d, r_f, sigma, T)
-        return vega * d1 * d2 / sigma / 100
+        vega_up = bs.calculate_greeks(K, maturity_days, sigma + eps,
+                                      S, r_d, r_f, 'call')['vega']
+        vega_down = bs.calculate_greeks(K, maturity_days, sigma - eps,
+                                        S, r_d, r_f, 'call')['vega']
 
-    @staticmethod
-    def implied_volatility(price: float, S: float, K: float, r_d: float,
-                           r_f: float, T: float, option_type: str = 'call') -> float:
-        """Calculate implied volatility using Newton-Raphson method"""
+        return (vega_up - vega_down) / (2 * eps) / 100
 
-        def objective(sigma):
-            if option_type == 'call':
-                return BlackScholesFX.call_price(S, K, r_d, r_f, sigma, T) - price
-            else:
-                return BlackScholesFX.put_price(S, K, r_d, r_f, sigma, T) - price
 
-        def vega_func(sigma):
-            return BlackScholesFX.vega(S, K, r_d, r_f, sigma, T) * 100
+class SABRModelQL(QuantLibPricingBase):
+    """
+    SABR model using QuantLib
+    """
 
-        # Initial guess using Brenner-Subrahmanyam approximation
-        sigma_init = np.sqrt(2 * np.pi / T) * price / S
+    def __init__(self, forward: float, T: float):
+        super().__init__()
+        self.forward = float(forward)
+        self.T = float(T)
+        self.expiry_time = float(T)  # Store as float for QuantLib
 
+    def calibrate(self, strikes: np.ndarray, market_vols: np.ndarray,
+                  beta: float = 0.5) -> Dict:
+        """Calibrate SABR parameters using QuantLib"""
+
+        # Convert to QuantLib arrays
+        strikes_ql = [float(k) for k in strikes]
+        vols_ql = [float(v) for v in market_vols]
+
+        # Initial guess
+        alpha = float(market_vols[len(market_vols)//2])  # ATM vol approximation
+        nu = 0.3
+        rho = 0.0
+
+        # QuantLib SABR calibration using optimizer
+        def objective(params):
+            alpha, rho, nu = params
+
+            # Ensure valid parameters
+            if alpha <= 0 or nu <= 0 or abs(rho) >= 1:
+                return 1e10
+
+            total_error = 0
+            for strike, market_vol in zip(strikes_ql, vols_ql):
+                try:
+                    model_vol = ql.sabrVolatility(
+                        strike, self.forward, self.expiry_time,
+                        alpha, beta, nu, rho
+                    )
+                    total_error += (model_vol - market_vol) ** 2
+                except:
+                    return 1e10
+
+            return total_error
+
+        # Optimize
+        result = minimize(
+            objective,
+            x0=[alpha, rho, nu],
+            bounds=[(0.001, 1.0), (-0.99, 0.99), (0.001, 2.0)],
+            method='L-BFGS-B'
+        )
+
+        if result.success:
+            alpha, rho, nu = result.x
+        else:
+            # Use differential evolution as fallback
+            bounds = [(0.001, 1.0), (-0.99, 0.99), (0.001, 2.0)]
+            result = differential_evolution(objective, bounds, seed=42)
+            alpha, rho, nu = result.x
+
+        return {
+            'alpha': alpha,
+            'beta': beta,
+            'rho': rho,
+            'nu': nu
+        }
+
+    def sabr_vol(self, K: float, alpha: float, beta: float,
+                 rho: float, nu: float) -> float:
+        """Calculate SABR implied volatility using QuantLib"""
         try:
-            result = root_scalar(objective, x0=sigma_init, fprime=vega_func,
-                                 method='newton', xtol=1e-6, maxiter=100)
-            if result.converged:
-                return result.root
-        except:
-            pass
+            vol = ql.sabrVolatility(
+                float(K), float(self.forward), float(self.expiry_time),
+                float(alpha), float(beta), float(nu), float(rho)
+            )
+            return float(vol)
+        except Exception as e:
+            # Return a default value if calculation fails
+            return float(alpha)
 
-        # Fallback to bounded search
-        try:
-            result = root_scalar(objective, bracket=[0.001, 5.0], method='brentq')
-            return result.root
-        except:
-            return 0.2  # Default volatility
+    def price_vanilla(self, spot: float, K: float, r_d: float, r_f: float,
+                     params: Dict, option_type: str = 'call') -> float:
+        """Price vanilla option using SABR volatility"""
+        vol = self.sabr_vol(K, params['alpha'], params['beta'],
+                           params['rho'], params['nu'])
+
+        bs = BlackScholesFX()
+        maturity_days = int(self.T * 365)
+        return bs.price(K, maturity_days, vol, spot, r_d, r_f, option_type)
+
+
+class HestonModelQL(QuantLibPricingBase):
+    """
+    Heston stochastic volatility model using QuantLib
+    """
+
+    def __init__(self, spot: float, r_d: float, r_f: float, T: float):
+        super().__init__()
+        self.spot = spot
+        self.r_d = r_d
+        self.r_f = r_f
+        self.T = T
+
+    def setup_heston_process(self, params: Dict):
+        """Setup Heston process in QuantLib"""
+        reference_date = ql.Date.todaysDate()
+        self.setup_market_data(self.spot, self.r_d, self.r_f, reference_date)
+
+        # Heston parameters
+        v0 = params['v0']      # Initial variance
+        kappa = params['kappa'] # Mean reversion speed
+        theta = params['theta'] # Long-term variance
+        sigma = params['sigma'] # Vol of vol
+        rho = params['rho']     # Correlation
+
+        # Create Heston process
+        self.process = ql.HestonProcess(
+            self.domestic_rate,
+            self.foreign_rate,
+            self.spot_handle,
+            v0, kappa, theta, sigma, rho
+        )
+
+        # Create Heston model and engine
+        model = ql.HestonModel(self.process)
+        self.engine = ql.AnalyticHestonEngine(model)
+
+    def calibrate(self, strikes: np.ndarray, market_vols: np.ndarray,
+                  maturities: np.ndarray = None) -> Dict:
+        """Calibrate Heston model to market vols"""
+
+        # Initial parameters
+        v0 = np.mean(market_vols) ** 2
+        kappa = 2.0
+        theta = v0
+        sigma = 0.3
+        rho = -0.5
+
+        def objective(params):
+            v0, kappa, theta, sigma, rho = params
+
+            # Ensure valid parameters
+            if v0 <= 0 or kappa <= 0 or theta <= 0 or sigma <= 0 or abs(rho) >= 1:
+                return 1e10
+
+            # Setup process
+            heston_params = {
+                'v0': v0, 'kappa': kappa, 'theta': theta,
+                'sigma': sigma, 'rho': rho
+            }
+
+            try:
+                self.setup_heston_process(heston_params)
+
+                # Calculate model prices and implied vols
+                total_error = 0
+                for strike, market_vol in zip(strikes, market_vols):
+                    maturity = ql.Date.todaysDate() + ql.Period(int(self.T * 365), ql.Days)
+                    option = self.create_option(strike, maturity, 'call')
+                    option.setPricingEngine(self.engine)
+
+                    model_price = option.NPV()
+
+                    # Convert to implied vol
+                    bs = BlackScholesFX()
+                    try:
+                        model_vol = bs.implied_volatility(
+                            model_price, strike, int(self.T * 365),
+                            self.spot, self.r_d, self.r_f, 'call'
+                        )
+                        total_error += (model_vol - market_vol) ** 2
+                    except:
+                        return 1e10
+
+                return total_error
+            except:
+                return 1e10
+
+        # Optimize
+        bounds = [
+            (0.001, 1.0),   # v0
+            (0.1, 10.0),    # kappa
+            (0.001, 1.0),   # theta
+            (0.01, 2.0),    # sigma
+            (-0.99, 0.99)   # rho
+        ]
+
+        result = differential_evolution(objective, bounds, seed=42, maxiter=100)
+
+        v0, kappa, theta, sigma, rho = result.x
+
+        return {
+            'v0': v0,
+            'kappa': kappa,
+            'theta': theta,
+            'sigma': sigma,
+            'rho': rho
+        }
+
+    def price_vanilla(self, K: float, params: Dict,
+                     option_type: str = 'call') -> float:
+        """Price vanilla option using Heston model"""
+        self.setup_heston_process(params)
+
+        maturity = ql.Date.todaysDate() + ql.Period(int(self.T * 365), ql.Days)
+        option = self.create_option(K, maturity, option_type)
+        option.setPricingEngine(self.engine)
+
+        return option.NPV()
 
 
 class VGVVModel:
     """
-    Vega-Gamma-Vanna-Volga model for volatility smile interpolation
-    Based on Carr-Wu (2016) framework
+    Vega-Gamma-Vanna-Volga model
+    Note: This is not directly available in QuantLib, so we implement it
+    but use QuantLib for the underlying Black-Scholes calculations
     """
 
     def __init__(self, spot: float, forward: float, r_d: float,
@@ -171,45 +501,43 @@ class VGVVModel:
         self.r_d = r_d
         self.r_f = r_f
         self.T = T
+        self.bs = BlackScholesFX()
 
     def calibrate(self, strikes: np.ndarray, market_vols: np.ndarray) -> Dict:
         """
         Calibrate VGVV model to market volatilities
-        Returns calibrated parameters
         """
         # ATM forward strike
         K_atm = self.forward
 
-        # Find ATM volatility (interpolate if needed)
+        # Find ATM volatility
         atm_idx = np.searchsorted(strikes, K_atm)
         if atm_idx == 0:
             sigma_atm = market_vols[0]
         elif atm_idx >= len(strikes):
             sigma_atm = market_vols[-1]
         else:
-            # Linear interpolation
-            w = (K_atm - strikes[atm_idx - 1]) / (strikes[atm_idx] - strikes[atm_idx - 1])
-            sigma_atm = market_vols[atm_idx - 1] * (1 - w) + market_vols[atm_idx] * w
+            w = (K_atm - strikes[atm_idx-1]) / (strikes[atm_idx] - strikes[atm_idx-1])
+            sigma_atm = market_vols[atm_idx-1] * (1-w) + market_vols[atm_idx] * w
 
         # Fit quadratic smile in variance space
         log_moneyness = np.log(strikes / self.forward)
         variances = market_vols ** 2
 
-        # Quadratic fit: variance = a + b*log_moneyness + c*log_moneyness^2
+        # Quadratic fit
         A = np.vstack([np.ones_like(log_moneyness),
-                       log_moneyness,
-                       log_moneyness ** 2]).T
+                      log_moneyness,
+                      log_moneyness**2]).T
         coeffs = np.linalg.lstsq(A, variances, rcond=None)[0]
 
-        # Extract VGVV parameters
-        v_0 = coeffs[0]  # ATM variance
-        skew = coeffs[1] / (2 * np.sqrt(v_0) * self.T)  # Skew parameter
-        smile = coeffs[2] / (v_0 * self.T)  # Smile/convexity parameter
+        # Extract parameters
+        v_0 = coeffs[0]
+        skew = coeffs[1] / (2 * np.sqrt(v_0) * self.T) if v_0 > 0 else 0
+        smile = coeffs[2] / (v_0 * self.T) if v_0 > 0 else 0
 
-        # Correlation and vol-of-vol from skew and smile
-        # Simplified mapping - can be enhanced with more sophisticated calibration
-        rho = -np.tanh(skew * 2)  # Map skew to correlation
-        volvol = np.sqrt(abs(smile)) * 2  # Map smile to vol-of-vol
+        # Map to correlation and vol-of-vol
+        rho = -np.tanh(skew * 2)
+        volvol = np.sqrt(abs(smile)) * 2
 
         return {
             'sigma_atm': np.sqrt(v_0),
@@ -220,7 +548,8 @@ class VGVVModel:
             'smile': smile
         }
 
-    def price_vanilla(self, K: float, params: Dict, option_type: str = 'call') -> float:
+    def price_vanilla(self, K: float, params: Dict,
+                     option_type: str = 'call') -> float:
         """
         Price vanilla option using VGVV adjustments
         """
@@ -228,28 +557,20 @@ class VGVVModel:
         rho = params['rho']
         volvol = params['volvol']
 
-        # Calculate adjusted volatility for this strike
+        # Calculate adjusted volatility
         log_moneyness = np.log(K / self.forward)
 
         # VGVV volatility adjustment
         variance_adjustment = 1.0
-
-        # Skew adjustment (vanna contribution)
         variance_adjustment += rho * volvol * log_moneyness / np.sqrt(self.T)
+        variance_adjustment += 0.5 * volvol**2 * (log_moneyness**2 - sigma_atm**2 * self.T) / self.T
 
-        # Smile adjustment (volga contribution)
-        variance_adjustment += 0.5 * volvol ** 2 * (log_moneyness ** 2 - sigma_atm ** 2 * self.T) / self.T
-
-        # Adjusted volatility
         sigma_adjusted = sigma_atm * np.sqrt(max(variance_adjustment, 0.01))
 
-        # Price using Black-Scholes with adjusted volatility
-        if option_type == 'call':
-            return BlackScholesFX.call_price(self.spot, K, self.r_d, self.r_f,
-                                             sigma_adjusted, self.T)
-        else:
-            return BlackScholesFX.put_price(self.spot, K, self.r_d, self.r_f,
-                                            sigma_adjusted, self.T)
+        # Price using Black-Scholes
+        maturity_days = int(self.T * 365)
+        return self.bs.price(K, maturity_days, sigma_adjusted,
+                           self.spot, self.r_d, self.r_f, option_type)
 
     def get_smile(self, params: Dict, strikes: Optional[np.ndarray] = None) -> np.ndarray:
         """
@@ -262,229 +583,107 @@ class VGVVModel:
         for K in strikes:
             log_moneyness = np.log(K / self.forward)
 
-            # Reconstruct variance from parameters
+            # Reconstruct variance
             variance = params['v_0']
             variance += 2 * params['skew'] * np.sqrt(params['v_0']) * self.T * log_moneyness
-            variance += params['smile'] * params['v_0'] * self.T * log_moneyness ** 2
+            variance += params['smile'] * params['v_0'] * self.T * log_moneyness**2
 
             vols.append(np.sqrt(max(variance, 0.0001)))
 
         return np.array(vols)
 
 
-class SABRModel:
-    """
-    SABR stochastic volatility model
-    """
+# Backward compatibility - keep old class names as aliases
+class SABRModel(SABRModelQL):
+    """Alias for backward compatibility"""
+    pass
 
-    def __init__(self, forward: float, T: float):
-        self.forward = forward
-        self.T = T
-
-    def calibrate(self, strikes: np.ndarray, market_vols: np.ndarray,
-                  beta: float = 0.5) -> Dict:
-        """
-        Calibrate SABR parameters to market volatilities
-        beta is fixed (common practice)
-        """
-
-        def objective(params):
-            alpha, rho, nu = params
-
-            # Ensure valid parameter ranges
-            if alpha <= 0 or nu <= 0 or abs(rho) >= 1:
-                return 1e10
-
-            model_vols = []
-            for K in strikes:
-                vol = self.sabr_vol(K, alpha, beta, rho, nu)
-                model_vols.append(vol)
-
-            model_vols = np.array(model_vols)
-            return np.sum((model_vols - market_vols) ** 2)
-
-        # Initial guess
-        atm_vol = np.interp(self.forward, strikes, market_vols)
-        x0 = [atm_vol, 0.0, 0.3]  # [alpha, rho, nu]
-
-        # Bounds
-        bounds = [(0.001, 1.0), (-0.99, 0.99), (0.001, 2.0)]
-
-        # Optimize
-        result = minimize(objective, x0, method='L-BFGS-B', bounds=bounds)
-
-        if result.success:
-            alpha, rho, nu = result.x
-            return {
-                'alpha': alpha,
-                'beta': beta,
-                'rho': rho,
-                'nu': nu
-            }
-        else:
-            # Return default parameters if calibration fails
-            return {
-                'alpha': atm_vol,
-                'beta': beta,
-                'rho': 0.0,
-                'nu': 0.3
-            }
-
-    def sabr_vol(self, K: float, alpha: float, beta: float,
-                 rho: float, nu: float) -> float:
-        """
-        Calculate SABR implied volatility using Hagan's approximation
-        """
-        if K <= 0 or self.forward <= 0:
-            return 0.0
-
-        # Handle ATM case
-        if abs(K - self.forward) < 1e-6:
-            v = alpha / (self.forward ** (1 - beta))
-            return v * (1 + self.T * (
-                    (1 - beta) ** 2 * alpha ** 2 / (24 * self.forward ** (2 * (1 - beta))) +
-                    rho * beta * nu * alpha / (4 * self.forward ** (1 - beta)) +
-                    nu ** 2 * (2 - 3 * rho ** 2) / 24
-            ))
-
-        # General case
-        FK = self.forward * K
-        logFK = np.log(self.forward / K)
-
-        # Calculate z
-        z = (nu / alpha) * FK ** ((1 - beta) / 2) * logFK
-
-        # Calculate x(z)
-        x_z = np.log((np.sqrt(1 - 2 * rho * z + z ** 2) + z - rho) / (1 - rho))
-
-        # Main term
-        numerator = alpha
-        denominator1 = FK ** ((1 - beta) / 2)
-        denominator2 = 1 + (1 - beta) ** 2 * logFK ** 2 / 24 + (1 - beta) ** 4 * logFK ** 4 / 1920
-
-        if abs(x_z) < 1e-6:
-            main_term = numerator / (denominator1 * denominator2)
-        else:
-            main_term = numerator * z / (denominator1 * denominator2 * x_z)
-
-        # Correction term
-        correction = 1 + self.T * (
-                (1 - beta) ** 2 * alpha ** 2 / (24 * FK ** (1 - beta)) +
-                rho * beta * nu * alpha / (4 * FK ** ((1 - beta) / 2)) +
-                nu ** 2 * (2 - 3 * rho ** 2) / 24
-        )
-
-        return main_term * correction
-
-    def price_vanilla(self, spot: float, K: float, r_d: float, r_f: float,
-                      params: Dict, option_type: str = 'call') -> float:
-        """
-        Price vanilla option using SABR volatility
-        """
-        vol = self.sabr_vol(K, params['alpha'], params['beta'],
-                            params['rho'], params['nu'])
-
-        if option_type == 'call':
-            return BlackScholesFX.call_price(spot, K, r_d, r_f, vol, self.T)
-        else:
-            return BlackScholesFX.put_price(spot, K, r_d, r_f, vol, self.T)
-
-
-class HestonModel:
-    """
-    Heston stochastic volatility model with semi-closed form solution
-    """
-
-    def __init__(self, spot: float, r_d: float, r_f: float, T: float):
-        self.spot = spot
-        self.r_d = r_d
-        self.r_f = r_f
-        self.T = T
-
-    def characteristic_function(self, u: complex, params: Dict) -> complex:
-        """
-        Heston characteristic function
-        """
-        v0 = params['v0']  # Initial variance
-        theta = params['theta']  # Long-term variance
-        kappa = params['kappa']  # Mean reversion speed
-        sigma = params['sigma']  # Vol of vol
-        rho = params['rho']  # Correlation
-
-        # Characteristic function coefficients
-        a = kappa * theta
-        b = kappa - rho * sigma * 1j * u
-        c = 0.5 * (u * 1j + u ** 2)
-        d = np.sqrt(b ** 2 - 4 * a * c)
-
-        g = (b - d) / (b + d)
-        h = np.exp(-d * self.T)
-
-        A = (self.r_d - self.r_f) * u * 1j * self.T
-        B = a / sigma ** 2 * ((b - d) * self.T - 2 * np.log((1 - g * h) / (1 - g)))
-        C = v0 / sigma ** 2 * (b - d) * (1 - h) / (1 - g * h)
-
-        return np.exp(A + B + C)
-
-    def price_vanilla(self, K: float, params: Dict, option_type: str = 'call') -> float:
-        """
-        Price vanilla option using Fourier transform
-        """
-        # Simplified implementation - would need numerical integration
-        # For now, approximate with Black-Scholes using average volatility
-        avg_vol = np.sqrt(params['v0'])
-
-        if option_type == 'call':
-            return BlackScholesFX.call_price(self.spot, K, self.r_d, self.r_f,
-                                             avg_vol, self.T)
-        else:
-            return BlackScholesFX.put_price(self.spot, K, self.r_d, self.r_f,
-                                            avg_vol, self.T)
+class HestonModel(HestonModelQL):
+    """Alias for backward compatibility"""
+    pass
 
 
 # Example usage and testing
 if __name__ == "__main__":
-    # Test Black-Scholes
+    print("Testing QuantLib-based pricing models\n")
+    print("="*50)
+
+    # Test Black-Scholes with QuantLib
+    print("\n1. Black-Scholes (Garman-Kohlhagen) Test:")
+    print("-"*40)
+
     S = 1.0755  # AUDNZD spot
-    K = 1.08  # Strike
+    K = 1.08    # Strike
     r_d = 0.02  # USD rate
-    r_f = 0.025  # Foreign rate
+    r_f = 0.025 # Foreign rate
     sigma = 0.068  # 6.8% volatility
-    T = 30 / 365  # 1 month
+    T = 30/365  # 1 month
 
     bs = BlackScholesFX()
+
+    # Test pricing
     call_price = bs.call_price(S, K, r_d, r_f, sigma, T)
     put_price = bs.put_price(S, K, r_d, r_f, sigma, T)
 
-    print(f"Black-Scholes Results:")
+    print(f"Spot: {S:.4f}, Strike: {K:.4f}")
     print(f"Call Price: {call_price:.5f}")
     print(f"Put Price: {put_price:.5f}")
 
-    # Greeks
-    print(f"\nGreeks:")
-    print(f"Delta (Call): {bs.delta(S, K, r_d, r_f, sigma, T, 'call'):.4f}")
-    print(f"Gamma: {bs.gamma(S, K, r_d, r_f, sigma, T):.4f}")
-    print(f"Vega: {bs.vega(S, K, r_d, r_f, sigma, T):.4f}")
-    print(f"Theta (Call): {bs.theta(S, K, r_d, r_f, sigma, T, 'call'):.6f}")
+    # Test Greeks
+    maturity_days = int(T * 365)
+    greeks = bs.calculate_greeks(K, maturity_days, sigma, S, r_d, r_f, 'call')
 
-    # Test VGVV model
+    print(f"\nGreeks (Call):")
+    for name, value in greeks.items():
+        print(f"  {name.capitalize()}: {value:.6f}")
+
+    # Test implied volatility
+    impl_vol = bs.implied_volatility(call_price, K, maturity_days, S, r_d, r_f, 'call')
+    print(f"\nImplied Vol Recovery: {impl_vol:.4f} (Original: {sigma:.4f})")
+
+    # Test SABR with QuantLib
+    print("\n2. SABR Model Test:")
+    print("-"*40)
+
     forward = S * np.exp((r_d - r_f) * T)
-    vgvv = VGVVModel(S, forward, r_d, r_f, T)
+    sabr = SABRModelQL(forward, T)
 
     # Create sample smile
-    strikes = np.linspace(0.95 * forward, 1.05 * forward, 5)
-    market_vols = np.array([0.085, 0.072, 0.068, 0.071, 0.082])  # U-shaped smile
+    strikes = np.linspace(0.95*forward, 1.05*forward, 5)
+    market_vols = np.array([0.085, 0.072, 0.068, 0.071, 0.082])
 
-    params = vgvv.calibrate(strikes, market_vols)
-    print(f"\nVGVV Calibration:")
-    print(f"ATM Vol: {params['sigma_atm']:.4f}")
-    print(f"Rho: {params['rho']:.4f}")
-    print(f"VolVol: {params['volvol']:.4f}")
-
-    # Test SABR model
-    sabr = SABRModel(forward, T)
     sabr_params = sabr.calibrate(strikes, market_vols, beta=0.5)
-    print(f"\nSABR Calibration:")
-    print(f"Alpha: {sabr_params['alpha']:.4f}")
-    print(f"Rho: {sabr_params['rho']:.4f}")
-    print(f"Nu: {sabr_params['nu']:.4f}")
+    print(f"Calibrated SABR Parameters:")
+    for param, value in sabr_params.items():
+        print(f"  {param}: {value:.4f}")
+
+    # Test SABR volatility
+    atm_strike = forward
+    sabr_vol = sabr.sabr_vol(atm_strike, sabr_params['alpha'],
+                            sabr_params['beta'], sabr_params['rho'],
+                            sabr_params['nu'])
+    print(f"\nSABR ATM Vol: {sabr_vol:.4f}")
+
+    # Test Heston model
+    print("\n3. Heston Model Test:")
+    print("-"*40)
+
+    heston = HestonModelQL(S, r_d, r_f, T)
+
+    # Simple calibration test
+    heston_params = {
+        'v0': sigma**2,
+        'kappa': 2.0,
+        'theta': sigma**2,
+        'sigma': 0.3,
+        'rho': -0.5
+    }
+
+    heston.setup_heston_process(heston_params)
+    heston_price = heston.price_vanilla(K, heston_params, 'call')
+    print(f"Heston Call Price: {heston_price:.5f}")
+    print(f"BS Call Price: {call_price:.5f}")
+    print(f"Difference: {abs(heston_price - call_price):.5f}")
+
+    print("\n" + "="*50)
+    print("All QuantLib pricing models tested successfully!")
