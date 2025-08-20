@@ -13,7 +13,7 @@ import warnings
 warnings.filterwarnings('ignore')
 
 # Import our modules
-from data_loader import FXDataLoader, FXVolatilityData, VolatilitySurfaceInterpolator
+from data_loader import FXDataLoader, FXVolatilityData, VolatilitySurfaceInterpolator, RateExtractor
 from pricing_models import BlackScholesFX, VGVVModel, SABRModel
 from trading_strategy import VolatilityArbitrageStrategy, CarryToVolStrategy, TradingSignal
 
@@ -24,7 +24,7 @@ class BacktestConfig:
     start_date: pd.Timestamp
     end_date: pd.Timestamp
     initial_capital: float = 1_000_000
-    pairs: List[str] = field(default_factory=lambda: ["AUDNZD"])
+    pairs: Optional[List[str]] = None  # None means auto-detect all pairs
     rebalance_frequency: str = "daily"  # daily, weekly, monthly
 
     # Strategy parameters
@@ -211,6 +211,11 @@ class FXOptionsBacktester:
         # Load risk-free rates
         self.data_loader.rf_curve.load_fred_data()
 
+        # Get pairs to trade
+        if self.config.pairs is None:
+            # Auto-detect all available pairs
+            self.config.pairs = self.data_loader.get_all_pairs()
+
         # Load FX data for all pairs
         for pair in self.config.pairs:
             try:
@@ -238,15 +243,30 @@ class FXOptionsBacktester:
         if not vol_data:
             return None
 
-        # Get risk-free rates
-        r_d = self.data_loader.rf_curve.get_rate(date, 30)  # USD rate
-        r_f = r_d + 0.005  # Foreign rate (simplified)
+        # Extract interest rates from forward points
+        rate_extractor = RateExtractor()
+
+        # Get USD rate from FRED data
+        usd_rate = self.data_loader.rf_curve.get_rate(date, 30)
+
+        # Extract implied rates from forward curve
+        implied_rates = rate_extractor.extract_rates_from_forwards(
+            vol_data.spot,
+            vol_data.forwards,
+            usd_rate
+        )
 
         # Build surface points for calibration
         calibration_points = []
 
         for tenor, days in FXDataLoader.TENOR_MAP.items():
             T = days / 365
+
+            # Get appropriate rates for this tenor
+            if tenor in implied_rates:
+                r_d, r_f = implied_rates[tenor]
+            else:
+                r_d, r_f = rate_extractor.interpolate_rate_curve(implied_rates, T)
 
             # Get forward
             forward_points = vol_data.forwards.get(tenor, 0)
@@ -261,7 +281,9 @@ class FXOptionsBacktester:
                         'strike': k,
                         'maturity': T,
                         'forward': forward,
-                        'vol': v
+                        'vol': v,
+                        'r_d': r_d,
+                        'r_f': r_f
                     })
 
         if not calibration_points:
@@ -275,12 +297,16 @@ class FXOptionsBacktester:
                 T_points = [p for p in calibration_points if p['maturity'] == T]
                 if T_points:
                     forward = T_points[0]['forward']
+                    r_d = T_points[0]['r_d']
+                    r_f = T_points[0]['r_f']
                     vgvv = VGVVModel(vol_data.spot, forward, r_d, r_f, T)
 
                     strikes = np.array([p['strike'] for p in T_points])
                     vols = np.array([p['vol'] for p in T_points])
 
                     params[T] = vgvv.calibrate(strikes, vols)
+                    params[T]['r_d'] = r_d  # Store rates with params
+                    params[T]['r_f'] = r_f
 
             return params
 
@@ -291,17 +317,21 @@ class FXOptionsBacktester:
                 T_points = [p for p in calibration_points if p['maturity'] == T]
                 if T_points:
                     forward = T_points[0]['forward']
+                    r_d = T_points[0]['r_d']
+                    r_f = T_points[0]['r_f']
                     sabr = SABRModel(forward, T)
 
                     strikes = np.array([p['strike'] for p in T_points])
                     vols = np.array([p['vol'] for p in T_points])
 
                     params[T] = sabr.calibrate(strikes, vols)
+                    params[T]['r_d'] = r_d
+                    params[T]['r_f'] = r_f
 
             return params
 
         else:
-            # Default to market vols
+            # Default to market vols with rates
             return {'market_vols': calibration_points}
 
     def generate_model_surface(self, params: Dict, vol_data: FXVolatilityData) -> Dict:

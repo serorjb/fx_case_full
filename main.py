@@ -37,7 +37,7 @@ def run_complete_analysis():
     print("\n1. LOADING FX DATA...")
     print("-"*40)
 
-    from data_loader import FXDataLoader, VolatilitySurfaceInterpolator
+    from data_loader import FXDataLoader, VolatilitySurfaceInterpolator, RateExtractor
 
     loader = FXDataLoader()
     loader.rf_curve.load_fred_data()
@@ -98,13 +98,36 @@ def run_complete_analysis():
 
     # Calibrate VGVV model
     if vol_data:
-        r_d, r_f = 0.02, 0.025  # Simplified rates
+        # Extract interest rates from forward points
+        rate_extractor = RateExtractor()
+
+        # Get USD rate from FRED data if available
+        usd_rate = loader.rf_curve.get_rate(sample_date, 30) if hasattr(loader, 'rf_curve') else None
+
+        # Extract rates from forward curve
+        implied_rates = rate_extractor.extract_rates_from_forwards(
+            vol_data.spot,
+            vol_data.forwards,
+            usd_rate
+        )
+
+        print(f"\nImplied Interest Rates from Forward Curve:")
+        for tenor, (r_d, r_f) in list(implied_rates.items())[:3]:
+            print(f"  {tenor}: Domestic={r_d:.3%}, Foreign={r_f:.3%}")
 
         for tenor in ["1M", "3M", "6M"]:
             if tenor not in vol_data.atm_vols:
                 continue
 
             T = loader.TENOR_MAP[tenor] / 365
+
+            # Get appropriate rates for this tenor
+            if tenor in implied_rates:
+                r_d, r_f = implied_rates[tenor]
+            else:
+                # Interpolate if needed
+                r_d, r_f = rate_extractor.interpolate_rate_curve(implied_rates, T)
+
             forward_points = vol_data.forwards.get(tenor, 0)
             forward = vol_data.spot + forward_points / 10000
 
@@ -209,7 +232,7 @@ def run_complete_analysis():
         start_date=pd.Timestamp("2006-01-01"),
         end_date=pd.Timestamp("2006-06-30"),  # 6 months for demo
         initial_capital=1_000_000,
-        pairs=["AUDNZD"],
+        pairs=None,  # None = auto-detect all pairs
         max_positions=20,
         max_position_size=0.02,
         vol_threshold=0.002,  # Lowered threshold

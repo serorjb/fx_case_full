@@ -18,16 +18,28 @@ class DataConfig:
     fred_data_path: str = "data/FRED"
     output_path: str = "output"
 
-    # Currency pairs to trade
-    pairs: List[str] = field(default_factory=lambda: [
-        "AUDNZD", "EURUSD", "GBPUSD", "USDJPY", "USDCHF",
-        "USDCAD", "AUDUSD", "NZDUSD", "EURGBP", "EURJPY"
-    ])
+    # Currency pairs to trade - will be auto-detected if None
+    pairs: Optional[List[str]] = None
 
     # Data quality thresholds
     min_data_points: int = 100
     max_missing_ratio: float = 0.10
     outlier_threshold: float = 10.0  # Standard deviations
+
+    def get_available_pairs(self) -> List[str]:
+        """Auto-detect available currency pairs from data directory"""
+        if self.pairs is not None:
+            return self.pairs
+
+        from pathlib import Path
+        data_path = Path(self.fx_data_path)
+        pairs = []
+
+        if data_path.exists():
+            for file in data_path.glob("*.parquet"):
+                pairs.append(file.stem)
+
+        return sorted(pairs)
 
 
 @dataclass
@@ -363,6 +375,7 @@ log_level: "INFO"
 parallel_processing: true
 num_workers: 4
 """
+
 
 if __name__ == "__main__":
     # Test configuration

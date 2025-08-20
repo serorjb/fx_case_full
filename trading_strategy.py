@@ -208,7 +208,9 @@ class VolatilityArbitrageStrategy:
                        signal: TradingSignal,
                        spot: float,
                        date: pd.Timestamp,
-                       bs_model) -> Optional[OptionPosition]:
+                       bs_model,
+                       r_d: float = None,
+                       r_f: float = None) -> Optional[OptionPosition]:
         """
         Execute a trading signal and create a position
         """
@@ -216,8 +218,12 @@ class VolatilityArbitrageStrategy:
         if len(self.positions) >= self.max_positions:
             return None
 
-        # Calculate option price using market vol
-        r_d, r_f = 0.02, 0.025  # Simplified rates
+        # Use provided rates or defaults
+        if r_d is None:
+            r_d = 0.02
+        if r_f is None:
+            r_f = 0.025
+
         T = (signal.expiry - date).days / 365
 
         if signal.option_type == 'call':

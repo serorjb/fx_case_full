@@ -1,4 +1,4 @@
-"""
+class VolatilitySurfaceInterpolator:"""
 FX Options Data Loader and Processor
 Handles loading of FX spot, forwards, and volatility surface data
 """
@@ -263,6 +263,107 @@ class FXDataLoader:
         for file in self.data_path.glob("*.parquet"):
             pairs.append(file.stem)
         return sorted(pairs)
+
+
+class RateExtractor:
+    """Extract implied interest rates from spot and forward points"""
+
+    @staticmethod
+    def extract_rates_from_forwards(spot: float, forward_points: Dict[str, float],
+                                   usd_rate: float = None) -> Dict[str, Tuple[float, float]]:
+        """
+        Extract implied interest rate differentials from forward points
+        Using covered interest rate parity:
+        F/S = exp((r_d - r_f) * T)
+
+        Returns: Dict[tenor, (r_domestic, r_foreign)]
+        """
+        tenor_days = {
+            '1W': 7, '2W': 14, '3W': 21, '1M': 30, '2M': 60,
+            '3M': 90, '4M': 120, '6M': 180, '9M': 270, '12M': 365
+        }
+
+        rates = {}
+
+        for tenor, fwd_points in forward_points.items():
+            if tenor not in tenor_days:
+                continue
+
+            T = tenor_days[tenor] / 365.0
+
+            # Forward price = Spot + Forward points (in pips)
+            forward = spot + fwd_points / 10000.0
+
+            # From covered interest parity: F/S = exp((r_d - r_f) * T)
+            # Therefore: ln(F/S) / T = r_d - r_f
+            rate_diff = np.log(forward / spot) / T if T > 0 else 0
+
+            # If we have USD rate, we can determine both rates
+            # Otherwise, we make assumptions
+            if usd_rate is not None:
+                # Assume domestic is USD
+                r_d = usd_rate
+                r_f = r_d - rate_diff
+            else:
+                # Without USD rate, assume symmetric around 2%
+                # This is more realistic than fixed rates
+                avg_rate = 0.02  # 2% average
+                r_d = avg_rate + rate_diff / 2
+                r_f = avg_rate - rate_diff / 2
+
+            # Ensure rates are reasonable (between -5% and 15%)
+            r_d = np.clip(r_d, -0.05, 0.15)
+            r_f = np.clip(r_f, -0.05, 0.15)
+
+            rates[tenor] = (r_d, r_f)
+
+        return rates
+
+    @staticmethod
+    def interpolate_rate_curve(rates_dict: Dict[str, Tuple[float, float]],
+                              target_maturity: float) -> Tuple[float, float]:
+        """
+        Interpolate rates for a specific maturity
+        target_maturity in years
+        """
+        if not rates_dict:
+            return (0.02, 0.02)  # Default fallback
+
+        tenor_years = {
+            '1W': 7/365, '2W': 14/365, '3W': 21/365, '1M': 30/365,
+            '2M': 60/365, '3M': 90/365, '4M': 120/365, '6M': 180/365,
+            '9M': 270/365, '12M': 1.0
+        }
+
+        # Convert to lists for interpolation
+        maturities = []
+        r_d_values = []
+        r_f_values = []
+
+        for tenor, (r_d, r_f) in rates_dict.items():
+            if tenor in tenor_years:
+                maturities.append(tenor_years[tenor])
+                r_d_values.append(r_d)
+                r_f_values.append(r_f)
+
+        if not maturities:
+            return (0.02, 0.02)
+
+        # Sort by maturity
+        sorted_idx = np.argsort(maturities)
+        maturities = [maturities[i] for i in sorted_idx]
+        r_d_values = [r_d_values[i] for i in sorted_idx]
+        r_f_values = [r_f_values[i] for i in sorted_idx]
+
+        # Interpolate
+        if target_maturity <= maturities[0]:
+            return (r_d_values[0], r_f_values[0])
+        elif target_maturity >= maturities[-1]:
+            return (r_d_values[-1], r_f_values[-1])
+        else:
+            r_d_interp = np.interp(target_maturity, maturities, r_d_values)
+            r_f_interp = np.interp(target_maturity, maturities, r_f_values)
+            return (r_d_interp, r_f_interp)
 
 
 class VolatilitySurfaceInterpolator:
