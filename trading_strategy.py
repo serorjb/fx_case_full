@@ -73,7 +73,8 @@ class VolatilityArbitrageStrategy:
                  vol_threshold: float = 0.01,  # 1% vol difference threshold
                  max_positions: int = 50,
                  target_delta_neutral: bool = True,
-                 margin_requirement: float = 0.10):  # 10% margin requirement
+                 margin_requirement: float = 0.10,  # 10% margin requirement
+                 transaction_cost: float = 0.0002):  # 2bp transaction cost
 
         self.initial_capital = initial_capital
         self.current_capital = initial_capital
@@ -82,6 +83,7 @@ class VolatilityArbitrageStrategy:
         self.max_positions = max_positions
         self.target_delta_neutral = target_delta_neutral
         self.margin_requirement = margin_requirement
+        self.transaction_cost = transaction_cost  # Store as instance variable
 
         self.positions: List[OptionPosition] = []
         self.closed_positions: List[OptionPosition] = []
@@ -102,8 +104,8 @@ class VolatilityArbitrageStrategy:
         """
         signals = []
 
-        # Transaction cost threshold (bid-ask + commission)
-        min_edge = 0.0005  # 5bp minimum edge after costs
+        # Use instance transaction cost
+        min_edge = self.transaction_cost + 0.0003  # Transaction cost + 3bp minimum edge
 
         for tenor in market_surface.keys():
             if tenor not in model_surface:
@@ -112,9 +114,16 @@ class VolatilityArbitrageStrategy:
             market_data = market_surface[tenor]
             model_data = model_surface[tenor]
 
-            # Get market and model vols
-            market_vol = market_data.get('vol', 0)
-            model_vol = model_data.get('vol', 0)
+            # Get market and model vols - handle both dict and float formats
+            if isinstance(market_data, dict):
+                market_vol = market_data.get('vol', 0)
+            else:
+                market_vol = float(market_data)
+
+            if isinstance(model_data, dict):
+                model_vol = model_data.get('vol', 0)
+            else:
+                model_vol = float(model_data)
 
             if market_vol == 0 or model_vol == 0:
                 continue
@@ -134,101 +143,76 @@ class VolatilityArbitrageStrategy:
                     signal_type = SignalType.UNDERPRICED
                     recommended_size = 1  # Long
 
-                # ATM straddle for maximum vega exposure
-                strike = spot
-                option_type = 'straddle'
+                # Calculate expected edge (profit after transaction costs)
+                expected_edge = abs(vol_diff) - self.transaction_cost
 
-                # Expected edge after transaction costs
-                transaction_cost = 0.0002  # 2bp bid-ask + commission
-                expected_edge = abs(vol_diff) - transaction_cost
+                # Calculate confidence based on vol difference magnitude
+                confidence = min(abs(vol_diff) / 0.02, 1.0)  # Max confidence at 2% difference
 
-                # Only trade if positive expected value
-                if expected_edge > 0:
-                    # Confidence based on edge size
-                    confidence = min(expected_edge / 0.001, 1.0)
+                # Create signal
+                expiry = date + pd.Timedelta(days=self._tenor_to_days(tenor))
 
-                    # Size based on confidence and Kelly criterion
-                    # Kelly fraction = edge / variance
-                    variance_estimate = 0.001  # Estimated variance of returns
-                    kelly_size = expected_edge / variance_estimate
+                signal = TradingSignal(
+                    pair="",  # Will be set by backtester
+                    strike=spot,  # ATM for now
+                    tenor=tenor,
+                    expiry=expiry,
+                    option_type='call',  # Default to calls
+                    signal_type=signal_type,
+                    market_vol=market_vol,
+                    model_vol=model_vol,
+                    vol_diff=vol_diff,
+                    expected_edge=expected_edge,
+                    confidence=confidence,
+                    recommended_size=recommended_size
+                )
+                signals.append(signal)
 
-                    # Apply fractional Kelly (25%) and position limits
-                    position_size = min(
-                        kelly_size * 0.25,
-                        self.max_position_size
-                    ) * recommended_size
+            # Also check for strike-specific opportunities if available
+            if isinstance(market_data, dict) and 'strikes' in market_data:
+                for strike_info in market_data.get('strikes', []):
+                    strike = strike_info.get('strike', spot)
+                    market_strike_vol = strike_info.get('vol', market_vol)
 
-                    # Create signal
-                    signal = TradingSignal(
-                        pair="",  # Will be set by backtester
-                        strike=strike,
-                        tenor=tenor,
-                        expiry=date + pd.Timedelta(days=self._tenor_to_days(tenor)),
-                        option_type=option_type,
-                        signal_type=signal_type,
-                        market_vol=market_vol,
-                        model_vol=model_vol,
-                        vol_diff=vol_diff,
-                        expected_edge=expected_edge,
-                        confidence=confidence,
-                        recommended_size=position_size
-                    )
+                    # Get corresponding model vol for this strike
+                    model_strike_vol = model_vol  # Default to ATM
+                    if isinstance(model_data, dict) and 'strikes' in model_data:
+                        for model_strike_info in model_data['strikes']:
+                            if abs(model_strike_info.get('strike', 0) - strike) < 0.0001:
+                                model_strike_vol = model_strike_info.get('vol', model_vol)
+                                break
 
-                    signals.append(signal)
+                    vol_diff_strike = market_strike_vol - model_strike_vol
 
-            # Also check individual strikes if available
-            if 'strikes' in model_data and 'vols' in model_data:
-                model_strikes = model_data['strikes']
-                model_vols_array = model_data['vols']
+                    if abs(vol_diff_strike) > min_edge:
+                        if vol_diff_strike > 0:
+                            signal_type_strike = SignalType.OVERPRICED
+                            position_size_strike = -1
+                        else:
+                            signal_type_strike = SignalType.UNDERPRICED
+                            position_size_strike = 1
 
-                # Check every strike
-                for i, strike in enumerate(model_strikes):
-                    if i < len(model_vols_array):
-                        model_strike_vol = model_vols_array[i]
+                        expected_edge_strike = abs(vol_diff_strike) - self.transaction_cost
+                        confidence_strike = min(abs(vol_diff_strike) / 0.02, 1.0)
 
-                        # Estimate market vol at this strike
-                        moneyness = strike / spot
+                        # Determine option type based on moneyness
+                        option_type = 'call' if strike >= spot else 'put'
 
-                        # Simple skew adjustment
-                        if moneyness < 1:  # OTM put
-                            skew_adjustment = 0.02 * (1 - moneyness)  # Puts more expensive
-                        else:  # OTM call
-                            skew_adjustment = -0.01 * (moneyness - 1)  # Calls cheaper
-
-                        market_strike_vol = market_vol + skew_adjustment
-
-                        vol_diff_strike = market_strike_vol - model_strike_vol
-
-                        # Trade if profitable after costs
-                        if abs(vol_diff_strike) > min_edge:
-                            signal_type = SignalType.OVERPRICED if vol_diff_strike > 0 else SignalType.UNDERPRICED
-                            option_type = 'put' if strike < spot else 'call'
-
-                            expected_edge_strike = abs(vol_diff_strike) - transaction_cost
-
-                            if expected_edge_strike > 0:
-                                confidence_strike = min(expected_edge_strike / 0.001, 1.0)
-                                kelly_size_strike = expected_edge_strike / variance_estimate
-                                position_size_strike = min(
-                                    kelly_size_strike * 0.25,
-                                    self.max_position_size * 0.5  # Half size for single options
-                                ) * np.sign(-vol_diff_strike)
-
-                                signal = TradingSignal(
-                                    pair="",
-                                    strike=strike,
-                                    tenor=tenor,
-                                    expiry=date + pd.Timedelta(days=self._tenor_to_days(tenor)),
-                                    option_type=option_type,
-                                    signal_type=signal_type,
-                                    market_vol=market_strike_vol,
-                                    model_vol=model_strike_vol,
-                                    vol_diff=vol_diff_strike,
-                                    expected_edge=expected_edge_strike,
-                                    confidence=confidence_strike,
-                                    recommended_size=position_size_strike
-                                )
-                                signals.append(signal)
+                        signal = TradingSignal(
+                            pair="",
+                            strike=strike,
+                            tenor=tenor,
+                            expiry=date + pd.Timedelta(days=self._tenor_to_days(tenor)),
+                            option_type=option_type,
+                            signal_type=signal_type_strike,
+                            market_vol=market_strike_vol,
+                            model_vol=model_strike_vol,
+                            vol_diff=vol_diff_strike,
+                            expected_edge=expected_edge_strike,
+                            confidence=confidence_strike,
+                            recommended_size=position_size_strike
+                        )
+                        signals.append(signal)
 
         # Sort by expected edge (best opportunities first)
         signals.sort(key=lambda x: x.expected_edge, reverse=True)
@@ -273,6 +257,12 @@ class VolatilityArbitrageStrategy:
             option_price = bs_model.put_price(spot, signal.strike, r_d, r_f,
                                              signal.market_vol, T)
 
+        # Position sizing: allocate fraction of capital to premium, derive units
+        risk_capital = self.current_capital * self.max_position_size
+        if option_price <= 0:
+            return None
+        units = (risk_capital / option_price) * np.sign(signal.recommended_size)
+
         # Calculate Greeks
         delta = bs_model.delta(spot, signal.strike, r_d, r_f, signal.market_vol, T,
                               signal.option_type)
@@ -281,17 +271,13 @@ class VolatilityArbitrageStrategy:
         theta = bs_model.theta(spot, signal.strike, r_d, r_f, signal.market_vol, T,
                               signal.option_type)
 
-        # Calculate position size in contracts
-        notional = self.current_capital * abs(signal.recommended_size)
-        position_size = notional / (option_price * spot * 100)  # Assuming 100 multiplier
-
         # Create position
         position = OptionPosition(
             pair=signal.pair,
             strike=signal.strike,
             expiry=signal.expiry,
             option_type=signal.option_type,
-            position_size=position_size * np.sign(signal.recommended_size),
+            position_size=units,
             entry_price=option_price,
             entry_vol=signal.market_vol,
             entry_date=date,
@@ -305,64 +291,12 @@ class VolatilityArbitrageStrategy:
         )
 
         self.positions.append(position)
-
         return position
 
-    def calculate_portfolio_greeks(self, spot: float, date: pd.Timestamp,
-                                   bs_model) -> Dict:
-        """
-        Calculate aggregate portfolio Greeks
-        """
-        total_delta = 0.0
-        total_gamma = 0.0
-        total_vega = 0.0
-        total_theta = 0.0
-
-        for pos in self.positions:
-            if not pos.is_closed:
-                T = max((pos.expiry - date).days / 365, 0)
-
-                if T > 0:
-                    # Recalculate Greeks at current spot
-                    delta = bs_model.delta(spot, pos.strike, 0.02, 0.025,
-                                          pos.entry_vol, T, pos.option_type)
-                    gamma = bs_model.gamma(spot, pos.strike, 0.02, 0.025,
-                                          pos.entry_vol, T)
-                    vega = bs_model.vega(spot, pos.strike, 0.02, 0.025,
-                                        pos.entry_vol, T)
-                    theta = bs_model.theta(spot, pos.strike, 0.02, 0.025,
-                                          pos.entry_vol, T, pos.option_type)
-
-                    # Aggregate
-                    total_delta += delta * pos.position_size
-                    total_gamma += gamma * pos.position_size
-                    total_vega += vega * pos.position_size
-                    total_theta += theta * pos.position_size
-
-        return {
-            'delta': total_delta,
-            'gamma': total_gamma,
-            'vega': total_vega,
-            'theta': total_theta,
-            'delta_exposure': total_delta * spot,
-            'gamma_exposure': total_gamma * spot**2 / 100,
-            'vega_exposure': total_vega,
-            'theta_exposure': total_theta
-        }
-
-    def hedge_delta(self, portfolio_greeks: Dict, spot: float) -> float:
-        """
-        Calculate spot hedge required for delta neutrality
-        """
-        if not self.target_delta_neutral:
-            return 0.0
-
-        return -portfolio_greeks['delta']
-
     def update_positions(self, spot: float, date: pd.Timestamp,
-                        market_vols: Dict, bs_model) -> None:
+                        current_vol: float, bs_model) -> None:
         """
-        Update position P&L and check for exits
+        Update existing positions and apply risk management
         """
         positions_to_close = []
 
@@ -372,13 +306,10 @@ class VolatilityArbitrageStrategy:
 
             T = (pos.expiry - date).days / 365
 
-            # Check if expired
             if T <= 0:
-                positions_to_close.append((i, "expired"))
+                # Option expired
+                positions_to_close.append((i, "expiry"))
                 continue
-
-            # Get current market vol (simplified)
-            current_vol = market_vols.get(pos.strike, pos.entry_vol)
 
             # Calculate current option value
             if pos.option_type == 'call':
@@ -388,11 +319,10 @@ class VolatilityArbitrageStrategy:
                 current_price = bs_model.put_price(spot, pos.strike, 0.02, 0.025,
                                                   current_vol, T)
 
-            # Calculate P&L
-            price_change = current_price - pos.entry_price
-            pos.pnl = price_change * pos.position_size * spot * 100
+            # Update P&L
+            pos.pnl = (current_price - pos.entry_price) * pos.position_size
 
-            # Check exit conditions
+            # Risk management rules
             # 1. Take profit if vol has mean-reverted significantly
             vol_change = current_vol - pos.entry_vol
             expected_vol_change = pos.model_vol - pos.entry_vol
@@ -450,14 +380,53 @@ class VolatilityArbitrageStrategy:
         pos.close_price = exit_price
         pos.close_reason = reason
 
-        # Final P&L calculation
-        pos.pnl = (exit_price - pos.entry_price) * pos.position_size * spot * 100
+        # Final P&L calculation (per-unit pricing, no extra spot multiplier)
+        pos.pnl = (exit_price - pos.entry_price) * pos.position_size
 
         # Update capital
         self.current_capital += pos.pnl
 
         # Move to closed positions
         self.closed_positions.append(pos)
+
+    def calculate_portfolio_greeks(self, spot: float, date: pd.Timestamp,
+                                  bs_model) -> Dict[str, float]:
+        """
+        Calculate aggregate portfolio Greeks
+        """
+        total_delta = 0.0
+        total_gamma = 0.0
+        total_vega = 0.0
+        total_theta = 0.0
+
+        for pos in self.positions:
+            if pos.is_closed:
+                continue
+
+            T = (pos.expiry - date).days / 365
+            if T <= 0:
+                continue
+
+            # Recalculate Greeks with current spot
+            delta = bs_model.delta(spot, pos.strike, 0.02, 0.025, pos.entry_vol, T,
+                                  pos.option_type)
+            gamma = bs_model.gamma(spot, pos.strike, 0.02, 0.025, pos.entry_vol, T)
+            vega = bs_model.vega(spot, pos.strike, 0.02, 0.025, pos.entry_vol, T)
+            theta = bs_model.theta(spot, pos.strike, 0.02, 0.025, pos.entry_vol, T,
+                                 pos.option_type)
+
+            # Aggregate (accounting for position sign)
+            total_delta += delta * pos.position_size
+            total_gamma += gamma * pos.position_size
+            total_vega += vega * pos.position_size
+            total_theta += theta * pos.position_size
+
+        return {
+            'delta': total_delta,
+            'gamma': total_gamma,
+            'vega': total_vega,
+            'theta': total_theta
+        }
 
     def calculate_performance_metrics(self) -> Dict:
         """
@@ -467,121 +436,132 @@ class VolatilityArbitrageStrategy:
             return {}
 
         # Extract P&L series
-        pnls = [pos.pnl for pos in self.closed_positions]
+        pnl_series = [pos.pnl for pos in self.closed_positions]
 
-        # Calculate metrics
-        total_pnl = sum(pnls)
-        num_trades = len(pnls)
-        win_rate = sum(1 for pnl in pnls if pnl > 0) / num_trades if num_trades > 0 else 0
+        if not pnl_series:
+            return {}
+
+        total_pnl = sum(pnl_series)
+        win_rate = sum(1 for pnl in pnl_series if pnl > 0) / len(pnl_series)
 
         # Calculate returns
-        returns = [pnl / self.initial_capital for pnl in pnls]
+        returns = []
+        capital = self.initial_capital
+        for pnl in pnl_series:
+            ret = pnl / capital
+            returns.append(ret)
+            capital += pnl
 
-        # Sharpe ratio (simplified - assumes daily returns)
-        if len(returns) > 1:
-            avg_return = np.mean(returns)
-            std_return = np.std(returns)
-            sharpe = np.sqrt(252) * avg_return / std_return if std_return > 0 else 0
+        if returns:
+            sharpe = np.mean(returns) / (np.std(returns) + 1e-8) * np.sqrt(252)
+            max_dd = self._calculate_max_drawdown(returns)
         else:
             sharpe = 0
-
-        # Maximum drawdown
-        cumulative = np.cumsum(pnls)
-        running_max = np.maximum.accumulate(cumulative)
-        drawdown = (cumulative - running_max) / self.initial_capital
-        max_drawdown = drawdown.min() if len(drawdown) > 0 else 0
+            max_dd = 0
 
         return {
             'total_pnl': total_pnl,
             'total_return': total_pnl / self.initial_capital,
-            'num_trades': num_trades,
             'win_rate': win_rate,
-            'avg_pnl': np.mean(pnls) if pnls else 0,
+            'num_trades': len(self.closed_positions),
             'sharpe_ratio': sharpe,
-            'max_drawdown': max_drawdown,
-            'current_capital': self.current_capital,
-            'active_positions': len([p for p in self.positions if not p.is_closed])
+            'max_drawdown': max_dd,
+            'final_capital': self.current_capital
         }
+
+    def _calculate_max_drawdown(self, returns: List[float]) -> float:
+        """Calculate maximum drawdown from returns series"""
+        cumulative = []
+        cum_ret = 1.0
+        for ret in returns:
+            cum_ret *= (1 + ret)
+            cumulative.append(cum_ret)
+
+        peak = cumulative[0]
+        max_dd = 0.0
+
+        for value in cumulative:
+            if value > peak:
+                peak = value
+            dd = (peak - value) / peak
+            if dd > max_dd:
+                max_dd = dd
+
+        return max_dd
 
 
 class CarryToVolStrategy:
     """
-    Carry to Volatility ratio strategy
-    Sells options when carry/vol ratio is attractive
+    Carry-to-Volatility ratio strategy
+    Trade based on forward premium vs implied volatility
     """
 
-    def __init__(self,
-                 carry_threshold: float = 1.5,
-                 min_vol: float = 0.05,
-                 max_vol: float = 0.30):
-
+    def __init__(self, carry_threshold: float = 1.5):
         self.carry_threshold = carry_threshold
-        self.min_vol = min_vol
-        self.max_vol = max_vol
 
-    def calculate_carry(self, forward: float, spot: float, T: float) -> float:
+    def calculate_carry_to_vol(self, spot: float, forward: float,
+                               vol: float, T: float) -> float:
         """
-        Calculate carry (forward premium/discount) annualized
+        Calculate carry-to-volatility ratio
+        Carry = (F-S)/S annualized
         """
-        if T <= 0:
-            return 0.0
+        carry = (forward - spot) / spot / T
+        carry_to_vol = carry / vol
+        return carry_to_vol
 
-        return (forward / spot - 1) / T
-
-    def generate_signal(self, spot: float, forward: float, vol: float,
-                       T: float) -> Optional[TradingSignal]:
+    def generate_signal(self, spot: float, forward: float,
+                        vol: float, T: float) -> Optional[TradingSignal]:
         """
-        Generate trading signal based on carry/vol ratio
+        Generate trading signal based on carry-to-vol ratio
         """
-        # Calculate carry
-        carry = self.calculate_carry(forward, spot, T)
+        ratio = self.calculate_carry_to_vol(spot, forward, vol, T)
 
-        # Calculate carry to vol ratio
-        if vol < self.min_vol or vol > self.max_vol:
-            return None
+        if abs(ratio) > self.carry_threshold:
+            # High carry relative to vol - potential opportunity
+            if ratio > 0:
+                # Positive carry - consider selling vol
+                signal_type = SignalType.OVERPRICED
+                recommended_size = -1
+            else:
+                # Negative carry - consider buying vol
+                signal_type = SignalType.UNDERPRICED
+                recommended_size = 1
 
-        carry_vol_ratio = abs(carry) / vol
+            confidence = min(abs(ratio) / (self.carry_threshold * 2), 1.0)
 
-        # Generate signal if ratio is attractive
-        if carry_vol_ratio > self.carry_threshold:
-            # Sell volatility (sell straddle/strangle)
-            signal_type = SignalType.OVERPRICED
-            confidence = min(carry_vol_ratio / (self.carry_threshold * 2), 1.0)
-
-            return TradingSignal(
-                pair="AUDNZD",
-                strike=forward,  # ATM
-                tenor=f"{int(T*365)}D",
-                expiry=pd.Timestamp.now() + pd.Timedelta(days=int(T*365)),
-                option_type='straddle',
+            signal = TradingSignal(
+                pair="",
+                strike=spot,
+                tenor="",
+                expiry=pd.Timestamp.now() + pd.Timedelta(days=T*365),
+                option_type='call',
                 signal_type=signal_type,
                 market_vol=vol,
-                model_vol=vol * 0.9,  # Expect vol to decrease
-                vol_diff=vol * 0.1,
-                expected_edge=carry * 0.5,
+                model_vol=vol * (1 - 0.1 * np.sign(ratio)),  # Adjust by 10%
+                vol_diff=vol * 0.1 * np.sign(ratio),
+                expected_edge=abs(ratio) / 100,
                 confidence=confidence,
-                recommended_size=-0.01  # Short position
+                recommended_size=recommended_size
             )
+            return signal
 
         return None
 
 
 # Example usage
 if __name__ == "__main__":
-    from fx_pricing_models import BlackScholesFX
-
-    # Initialize strategy
+    # Create strategy
     strategy = VolatilityArbitrageStrategy(
         initial_capital=1_000_000,
         max_position_size=0.02,
-        vol_threshold=0.01
+        vol_threshold=0.005
     )
 
     # Create sample market and model surfaces
     market_surface = {
-        '1M': {'vol': 0.12},
-        '3M': {'vol': 0.11},
-        '6M': {'vol': 0.10}
+        '1M': {'vol': 0.12},  # 12% implied vol
+        '3M': {'vol': 0.11},  # 11% implied vol
+        '6M': {'vol': 0.10}   # 10% implied vol
     }
 
     model_surface = {

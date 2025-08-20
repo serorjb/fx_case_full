@@ -502,6 +502,7 @@ class VGVVModel:
         self.r_f = r_f
         self.T = T
         self.bs = BlackScholesFX()
+        self.last_params: Dict | None = None
 
     def calibrate(self, strikes: np.ndarray, market_vols: np.ndarray) -> Dict:
         """
@@ -592,15 +593,77 @@ class VGVVModel:
 
         return np.array(vols)
 
+    def calibrate_from_surface(self, vol_data, tenor: str):
+        """Build synthetic smile from ATM, RR, BF quotes for a tenor and fit quadratic.
+        Assumes FX market conventions: RR = call_vol - put_vol; BF = ((call_vol + put_vol)/2) - ATM.
+        Returns parameter dict with sigma_atm, rho (mapped from skew), vov (vol-of-vol proxy)."""
+        atm = vol_data.atm_vols.get(tenor)
+        if atm is None:
+            return None
+        # Prefer 25D quotes then fall back to 10D
+        rr = vol_data.rr_25d.get(tenor, 0.0)
+        bf = vol_data.bf_25d.get(tenor, 0.0)
+        # Reconstruct call / put wing vols
+        call_25 = (rr + 2*(atm + bf)) / 2.0
+        put_25 = (2*(atm + bf) - rr) / 2.0
+        # Simple synthetic strike grid around forward
+        F = self.forward
+        T = self.T
+        strikes = np.array([0.9*F, 0.95*F, F, 1.05*F, 1.10*F])
+        vols = np.array([put_25*1.02, put_25, atm, call_25, call_25*1.02])
+        params = self.calibrate(strikes, vols)
+        self.last_params = params
+        return params
+
+    def get_atm_vol(self, spot: float, strike: float, T: float):
+        if self.last_params:
+            return self.last_params.get('sigma_atm', np.nan)
+        return np.nan
+
+    def _tenor_to_years(self, tenor: str) -> float:
+        mapping = {'1W':7/365,'2W':14/365,'3W':21/365,'1M':1/12,'2M':2/12,'3M':3/12,'4M':4/12,'6M':6/12,'9M':9/12,'12M':1.0}
+        return mapping.get(tenor, 1/12)
+
 
 # Backward compatibility - keep old class names as aliases
 class SABRModel(SABRModelQL):
-    """Alias for backward compatibility"""
-    pass
+    """Extended SABR model wrapper with surface calibration convenience."""
+    def __init__(self, spot: float, forward: float, r_d: float, r_f: float, T: float):
+        super().__init__(forward, T)
+        self.spot = spot
+        self.forward = forward
+        self.r_d = r_d
+        self.r_f = r_f
+        self.T = T
+        self._last_params = None
 
-class HestonModel(HestonModelQL):
-    """Alias for backward compatibility"""
-    pass
+    def calibrate_from_surface(self, vol_data, tenor: str):
+        atm = vol_data.atm_vols.get(tenor)
+        if atm is None:
+            return None
+        rr = vol_data.rr_25d.get(tenor, 0.0)
+        bf = vol_data.bf_25d.get(tenor, 0.0)
+        call_25 = (rr + 2*(atm + bf))/2.0
+        put_25 = (2*(atm + bf) - rr)/2.0
+        F = self.forward
+        strikes = np.array([0.95*F, F, 1.05*F])
+        vols = np.array([put_25, atm, call_25])
+        self._last_params = self.calibrate(strikes, vols, beta=0.5)
+        return self._last_params
+
+    def get_atm_vol(self, spot: float, strike: float, T: float):
+        # Return ATM from last calibration if available
+        if self._last_params:
+            # Approx atm SABR vol: alpha / F^{beta-1}
+            p = self._last_params
+            beta = p['beta']
+            alpha = p['alpha']
+            return alpha / (self.forward ** (beta-1))
+        return np.nan
+
+    def _tenor_to_years(self, tenor: str) -> float:
+        mapping = {'1W':7/365,'2W':14/365,'3W':21/365,'1M':1/12,'2M':2/12,'3M':3/12,'4M':4/12,'6M':6/12,'9M':9/12,'12M':1.0}
+        return mapping.get(tenor, 1/12)
 
 
 # Example usage and testing

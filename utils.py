@@ -1,6 +1,7 @@
 """
 utils.py
 Utility functions for FX options trading system
+Complete set of helper functions for dates, volatility, performance metrics, and visualization
 """
 
 import numpy as np
@@ -56,6 +57,22 @@ class DateUtils:
             third_friday = first_friday + pd.Timedelta(weeks=2)
             return date.date() == third_friday.date()
         return False
+
+    @staticmethod
+    def get_maturity_bucket(days_to_expiry: int) -> str:
+        """Categorize days to expiry into standard tenor buckets"""
+        if days_to_expiry <= 7:
+            return '1W'
+        elif days_to_expiry <= 30:
+            return '1M'
+        elif days_to_expiry <= 90:
+            return '3M'
+        elif days_to_expiry <= 180:
+            return '6M'
+        elif days_to_expiry <= 365:
+            return '12M'
+        else:
+            return '>1Y'
 
 
 class VolatilityUtils:
@@ -125,6 +142,20 @@ class VolatilityUtils:
         yz_var = overnight_var + k * open_close_var + (1 - k) * rs_var
 
         return np.sqrt(yz_var * 252)
+
+    @staticmethod
+    def ewma_volatility(returns: np.ndarray, lambda_param: float = 0.94) -> np.ndarray:
+        """
+        Exponentially weighted moving average volatility
+        """
+        n = len(returns)
+        variance = np.zeros(n)
+        variance[0] = returns[0] ** 2
+
+        for t in range(1, n):
+            variance[t] = lambda_param * variance[t-1] + (1 - lambda_param) * returns[t] ** 2
+
+        return np.sqrt(variance) * np.sqrt(252)
 
 
 class PerformanceMetrics:
@@ -202,6 +233,20 @@ class PerformanceMetrics:
         else:
             return 0
 
+    @staticmethod
+    def omega_ratio(returns: np.ndarray, threshold: float = 0) -> float:
+        """Calculate Omega ratio"""
+        excess = returns - threshold
+        gains = excess[excess > 0].sum()
+        losses = -excess[excess < 0].sum()
+
+        if losses > 0:
+            return gains / losses
+        elif gains > 0:
+            return np.inf
+        else:
+            return 0
+
 
 class DataValidator:
     """Validate and clean data"""
@@ -265,6 +310,22 @@ class DataValidator:
 
         return cleaned
 
+    @staticmethod
+    def validate_option_data(strike: float, spot: float, vol: float,
+                           maturity: float) -> Tuple[bool, str]:
+        """Validate single option data point"""
+        if strike <= 0:
+            return False, "Strike must be positive"
+        if spot <= 0:
+            return False, "Spot must be positive"
+        if vol <= 0 or vol > 5:
+            return False, f"Volatility {vol} out of reasonable range"
+        if maturity <= 0:
+            return False, "Maturity must be positive"
+        if strike / spot > 10 or strike / spot < 0.1:
+            return False, "Strike too far from spot"
+        return True, "Valid"
+
 
 class Visualization:
     """Visualization utilities"""
@@ -327,6 +388,51 @@ class Visualization:
         plt.tight_layout()
         plt.show()
 
+    @staticmethod
+    def plot_performance_summary(equity_curve: pd.Series, returns: pd.Series):
+        """Plot comprehensive performance summary"""
+        fig, axes = plt.subplots(2, 2, figsize=(15, 10))
+
+        # Equity curve
+        axes[0, 0].plot(equity_curve.index, equity_curve.values)
+        axes[0, 0].set_title('Equity Curve')
+        axes[0, 0].set_xlabel('Date')
+        axes[0, 0].set_ylabel('Portfolio Value ($)')
+        axes[0, 0].grid(True, alpha=0.3)
+
+        # Drawdown
+        cummax = equity_curve.cummax()
+        drawdown = (equity_curve - cummax) / cummax * 100
+        axes[0, 1].fill_between(drawdown.index, drawdown.values, 0,
+                               color='red', alpha=0.3)
+        axes[0, 1].set_title('Drawdown')
+        axes[0, 1].set_xlabel('Date')
+        axes[0, 1].set_ylabel('Drawdown (%)')
+        axes[0, 1].grid(True, alpha=0.3)
+
+        # Returns distribution
+        axes[1, 0].hist(returns * 100, bins=50, edgecolor='black')
+        axes[1, 0].set_title('Returns Distribution')
+        axes[1, 0].set_xlabel('Daily Return (%)')
+        axes[1, 0].set_ylabel('Frequency')
+        axes[1, 0].axvline(x=0, color='red', linestyle='--', alpha=0.5)
+        axes[1, 0].grid(True, alpha=0.3)
+
+        # Rolling Sharpe
+        rolling_sharpe = returns.rolling(252).apply(
+            lambda x: np.sqrt(252) * x.mean() / x.std() if x.std() > 0 else 0
+        )
+        axes[1, 1].plot(rolling_sharpe.index, rolling_sharpe.values)
+        axes[1, 1].set_title('Rolling 1-Year Sharpe Ratio')
+        axes[1, 1].set_xlabel('Date')
+        axes[1, 1].set_ylabel('Sharpe Ratio')
+        axes[1, 1].axhline(y=0, color='red', linestyle='--', alpha=0.5)
+        axes[1, 1].grid(True, alpha=0.3)
+
+        plt.suptitle('Performance Summary', fontsize=16)
+        plt.tight_layout()
+        plt.show()
+
 
 class DataPersistence:
     """Save and load data"""
@@ -366,12 +472,29 @@ class DataPersistence:
             return obj.isoformat()
         elif isinstance(obj, pd.DataFrame):
             return obj.to_dict()
+        elif isinstance(obj, pd.Series):
+            return obj.to_dict()
         elif isinstance(obj, dict):
             return {k: DataPersistence._make_serializable(v) for k, v in obj.items()}
         elif isinstance(obj, list):
             return [DataPersistence._make_serializable(item) for item in obj]
+        elif isinstance(obj, (np.integer, np.floating)):
+            return float(obj)
         else:
             return obj
+
+    @staticmethod
+    def save_portfolio_state(portfolio: Dict, filename: str):
+        """Save portfolio state with positions and Greeks"""
+        state = {
+            'timestamp': datetime.now().isoformat(),
+            'positions': portfolio.get('positions', []),
+            'greeks': portfolio.get('greeks', {}),
+            'capital': portfolio.get('capital', 0),
+            'margin_used': portfolio.get('margin_used', 0),
+            'realized_pnl': portfolio.get('realized_pnl', 0)
+        }
+        DataPersistence.save_results(state, filename)
 
 
 class Logger:
@@ -407,6 +530,21 @@ class Logger:
     def error(self, message: str):
         self.log(message, "ERROR")
 
+    def log_trade(self, trade_info: Dict):
+        """Log trade execution"""
+        trade_str = (f"TRADE: {trade_info.get('action', 'UNKNOWN')} "
+                    f"{trade_info.get('quantity', 0)} {trade_info.get('instrument', 'UNKNOWN')} "
+                    f"@ {trade_info.get('price', 0):.4f}")
+        self.info(trade_str)
+
+    def log_position(self, position_info: Dict):
+        """Log position update"""
+        pos_str = (f"POSITION: {position_info.get('pair', 'UNKNOWN')} "
+                  f"Delta: {position_info.get('delta', 0):.4f} "
+                  f"Vega: {position_info.get('vega', 0):.4f} "
+                  f"P&L: ${position_info.get('pnl', 0):,.2f}")
+        self.info(pos_str)
+
 
 # Example usage
 if __name__ == "__main__":
@@ -416,19 +554,42 @@ if __name__ == "__main__":
     expiry = date_utils.get_expiry_date("3M", start)
     print(f"3M expiry from {start.date()}: {expiry.date()}")
 
+    bucket = date_utils.get_maturity_bucket(45)
+    print(f"45 days maps to bucket: {bucket}")
+
     # Test volatility utilities
     returns = np.random.normal(0, 0.01, 252)
     vol = VolatilityUtils.realized_volatility(returns)
     print(f"\nRealized volatility: {vol:.2%}")
 
+    ewma_vol = VolatilityUtils.ewma_volatility(returns)
+    print(f"EWMA volatility (last): {ewma_vol[-1]:.2%}")
+
     # Test performance metrics
     metrics = PerformanceMetrics()
     sharpe = metrics.sharpe_ratio(returns)
-    print(f"Sharpe ratio: {sharpe:.2f}")
+    print(f"\nSharpe ratio: {sharpe:.2f}")
+
+    omega = metrics.omega_ratio(returns)
+    print(f"Omega ratio: {omega:.2f}")
+
+    # Test data validation
+    validator = DataValidator()
+    is_valid, error_msg = validator.validate_option_data(
+        strike=100, spot=100, vol=0.2, maturity=0.25
+    )
+    print(f"\nOption data validation: {is_valid} - {error_msg}")
 
     # Test logger
     logger = Logger()
     logger.info("System initialized")
     logger.warning("Low volatility detected")
+
+    logger.log_trade({
+        'action': 'BUY',
+        'quantity': 100,
+        'instrument': 'EURUSD 1M ATM Call',
+        'price': 0.0125
+    })
 
     print("\nUtilities module loaded successfully")
