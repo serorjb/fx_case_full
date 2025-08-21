@@ -7,11 +7,9 @@
     <list default="true" id="637e7064-2d68-4de1-8449-ece28e37a35d" name="Changes" comment="-">
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/backtesting_engine.py" beforeDir="false" afterPath="$PROJECT_DIR$/backtesting_engine.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/config.py" beforeDir="false" afterPath="$PROJECT_DIR$/config.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/data_loader.py" beforeDir="false" afterPath="$PROJECT_DIR$/data_loader.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/main.py" beforeDir="false" afterPath="$PROJECT_DIR$/main.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/risk_management.py" beforeDir="false" afterPath="$PROJECT_DIR$/risk_management.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/trading_strategy.py" beforeDir="false" afterPath="$PROJECT_DIR$/trading_strategy.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/utils.py" beforeDir="false" afterPath="$PROJECT_DIR$/utils.py" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -37,28 +35,30 @@
     <option name="hideEmptyMiddlePackages" value="true" />
     <option name="showLibraryContents" value="true" />
   </component>
-  <component name="PropertiesComponent"><![CDATA[{
-  "keyToString": {
-    "Python.allocator.executor": "Run",
-    "Python.backtest.executor": "Run",
-    "Python.build_rates.executor": "Run",
-    "Python.config.executor": "Run",
-    "Python.config_io.executor": "Run",
-    "Python.costs.executor": "Run",
-    "Python.curve (1).executor": "Run",
-    "Python.discount_curves.executor": "Run",
-    "Python.draft (1).executor": "Run",
-    "Python.draft.executor": "Run",
-    "Python.draft2.executor": "Run",
-    "Python.draft_2.executor": "Debug",
-    "Python.main (1).executor": "Run",
-    "Python.plot_equity.executor": "Run",
-    "Python.run_backtests.executor": "Run",
-    "Python.run_strategy.executor": "Run",
-    "RunOnceActivity.ShowReadmeOnStart": "true",
-    "last_opened_file_path": "C:/Dev/fx_case_full/src"
+  <component name="PropertiesComponent">{
+  &quot;keyToString&quot;: {
+    &quot;Python.allocator.executor&quot;: &quot;Run&quot;,
+    &quot;Python.backtest.executor&quot;: &quot;Run&quot;,
+    &quot;Python.build_rates.executor&quot;: &quot;Run&quot;,
+    &quot;Python.config.executor&quot;: &quot;Run&quot;,
+    &quot;Python.config_io.executor&quot;: &quot;Run&quot;,
+    &quot;Python.costs.executor&quot;: &quot;Run&quot;,
+    &quot;Python.curve (1).executor&quot;: &quot;Run&quot;,
+    &quot;Python.discount_curves.executor&quot;: &quot;Run&quot;,
+    &quot;Python.draft (1).executor&quot;: &quot;Run&quot;,
+    &quot;Python.draft.executor&quot;: &quot;Run&quot;,
+    &quot;Python.draft2.executor&quot;: &quot;Run&quot;,
+    &quot;Python.draft_2.executor&quot;: &quot;Debug&quot;,
+    &quot;Python.main (1).executor&quot;: &quot;Run&quot;,
+    &quot;Python.plot_equity.executor&quot;: &quot;Run&quot;,
+    &quot;Python.run_backtests.executor&quot;: &quot;Run&quot;,
+    &quot;Python.run_strategy.executor&quot;: &quot;Run&quot;,
+    &quot;Python.run_ultra_optimized.executor&quot;: &quot;Run&quot;,
+    &quot;RunOnceActivity.ShowReadmeOnStart&quot;: &quot;true&quot;,
+    &quot;last_opened_file_path&quot;: &quot;C:/Dev/fx_case_full/src&quot;,
+    &quot;settings.editor.selected.configurable&quot;: &quot;promo.ai.assistant&quot;
   }
-}]]></component>
+}</component>
   <component name="RecentsManager">
     <key name="CopyFile.RECENT_KEYS">
       <recent name="C:\Dev\fx_case_full\src" />
@@ -73,7 +73,7 @@
       <recent name="C:\Dev\fx_case_full\config" />
     </key>
   </component>
-  <component name="RunManager" selected="Python.draft2">
+  <component name="RunManager" selected="Python.main (1)">
     <configuration name="config" type="PythonConfigurationType" factoryName="Python" temporary="true" nameIsGenerated="true">
       <module name="fx_case_full" />
       <option name="ENV_FILES" value="" />
@@ -162,7 +162,7 @@
       <option name="INPUT_FILE" value="" />
       <method v="2" />
     </configuration>
-    <configuration name="main" type="PythonConfigurationType" factoryName="Python" temporary="true" nameIsGenerated="true">
+    <configuration name="run_ultra_optimized" type="PythonConfigurationType" factoryName="Python" temporary="true" nameIsGenerated="true">
       <module name="fx_case_full" />
       <option name="ENV_FILES" value="" />
       <option name="INTERPRETER_OPTIONS" value="" />
@@ -175,7 +175,7 @@
       <option name="IS_MODULE_SDK" value="true" />
       <option name="ADD_CONTENT_ROOTS" value="true" />
       <option name="ADD_SOURCE_ROOTS" value="true" />
-      <option name="SCRIPT_NAME" value="C:\Dev\fx_case_full\main.py" />
+      <option name="SCRIPT_NAME" value="$PROJECT_DIR$/run_ultra_optimized.py" />
       <option name="PARAMETERS" value="" />
       <option name="SHOW_COMMAND_LINE" value="false" />
       <option name="EMULATE_TERMINAL" value="false" />
@@ -186,11 +186,11 @@
     </configuration>
     <recent_temporary>
       <list>
-        <item itemvalue="Python.draft2" />
         <item itemvalue="Python.main (1)" />
+        <item itemvalue="Python.run_ultra_optimized" />
+        <item itemvalue="Python.draft2" />
         <item itemvalue="Python.draft" />
         <item itemvalue="Python.config" />
-        <item itemvalue="Python.main" />
       </list>
     </recent_temporary>
   </component>
@@ -315,7 +315,15 @@
       <option name="project" value="LOCAL" />
       <updated>1755652327640</updated>
     </task>
-    <option name="localTasksCounter" value="15" />
+    <task id="LOCAL-00015" summary="-">
+      <option name="closed" value="true" />
+      <created>1755666932193</created>
+      <option name="number" value="00015" />
+      <option name="presentableId" value="LOCAL-00015" />
+      <option name="project" value="LOCAL" />
+      <updated>1755666932193</updated>
+    </task>
+    <option name="localTasksCounter" value="16" />
     <servers />
   </component>
   <component name="VcsManagerConfiguration">

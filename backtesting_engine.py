@@ -5,9 +5,8 @@ Enhanced FX Options Backtesting Engine - Fixed Version
 import numpy as np
 import pandas as pd
 from collections import defaultdict
-import uuid
 from dataclasses import dataclass
-from typing import List, Dict, Optional, Tuple
+from typing import List, Optional
 import warnings
 warnings.filterwarnings('ignore')
 
@@ -29,6 +28,18 @@ class BacktestConfig:
     commission: float = 0.0001
     delta_threshold: float = 0.03
     max_daily_trades: int = 20
+    margin_requirement: float = 0.30  # 30% margin on short option underlying exposure
+    max_open_positions: int = 500     # Global hard cap
+    max_signals_per_pair: int = 5
+    per_pair_position_limit: int = 120
+    per_tenor_position_limit: int = 40
+    is_end_date: Optional[pd.Timestamp] = None  # In-sample end date for calibration
+    optimize: bool = False
+    vol_threshold_grid: Optional[List[float]] = None
+    max_position_size_grid: Optional[List[float]] = None
+    delta_threshold_grid: Optional[List[float]] = None
+    close_vol_edge_factor: float = 0.5  # Close when mispricing shrinks below factor * vol_threshold
+    output_dir: str = "output"
 
 
 class BacktestResults:
@@ -44,6 +55,16 @@ class BacktestResults:
         self.positions_history = []
         self.returns = []
         self.metrics = {}
+        self.realized_pnl_series = []
+        self.unrealized_pnl_series = []
+        self.hedge_pnl_series = []
+        self.margin_series = []
+        self.var_history = []
+        self.es_history = []
+        self.regime_tags = []
+        self.closed_positions = []  # early exits
+        self._cumulative_realized = 0.0
+        self._cumulative_hedge = 0.0
 
     def add_snapshot(self, date, equity, positions, greeks, daily_trades=0, daily_pnl=0):
         """Add daily portfolio snapshot"""
@@ -53,7 +74,8 @@ class BacktestResults:
             'num_positions': len(positions),
             'daily_trades': daily_trades,
             'daily_pnl': daily_pnl,
-            'greeks': greeks.copy()
+            'greeks': greeks.copy(),
+            'margin_used': getattr(self, 'margin_used', None)
         }
 
         self.daily_snapshots.append(snapshot)
@@ -67,6 +89,10 @@ class BacktestResults:
         # Store Greeks
         for greek, value in greeks.items():
             self.greeks_history[greek].append({'date': date, 'value': value})
+
+        # Margin tracking
+        if hasattr(self, 'margin_used'):
+            self.margin_series.append({'date': date, 'margin': getattr(self, 'margin_used', 0)})
 
     def calculate_final_metrics(self, initial_capital, all_trades, expired_pnl):
         """Calculate comprehensive performance metrics"""
@@ -120,6 +146,26 @@ class BacktestResults:
             'avg_trade_pnl': total_expired_pnl / total_expired if total_expired > 0 else 0
         }
 
+    def export_reports(self, path: str):
+        import os, csv
+        os.makedirs(path, exist_ok=True)
+        # Trades
+        if self.trades:
+            pd.DataFrame(self.trades).to_csv(os.path.join(path, 'trades.csv'), index=False)
+        if self.expired_positions:
+            pd.DataFrame(self.expired_positions).to_csv(os.path.join(path, 'expired_positions.csv'), index=False)
+        if self.closed_positions:
+            pd.DataFrame(self.closed_positions).to_csv(os.path.join(path, 'early_closed_positions.csv'), index=False)
+        if self.daily_snapshots:
+            pd.DataFrame(self.daily_snapshots).to_csv(os.path.join(path, 'daily_snapshots.csv'), index=False)
+        if self.greeks_history:
+            for g, series in self.greeks_history.items():
+                pd.DataFrame(series).to_csv(os.path.join(path, f'greeks_{g}.csv'), index=False)
+        if self.var_history:
+            pd.DataFrame(self.var_history).to_csv(os.path.join(path, 'var_series.csv'), index=False)
+        if self.es_history:
+            pd.DataFrame(self.es_history).to_csv(os.path.join(path, 'es_series.csv'), index=False)
+
 
 class FXOptionsBacktester:
     """
@@ -141,6 +187,16 @@ class FXOptionsBacktester:
         # Performance tracking
         self.current_equity = config.initial_capital
         self.results = BacktestResults()
+        self.margin_used = 0.0
+        self.stop_trading = False
+
+        # Realized and unrealized P&L
+        self.realized_pnl = 0.0
+        self.unrealized_pnl = 0.0
+
+        # Per-pair and per-tenor position counts
+        self.per_pair_counts = defaultdict(int)
+        self.per_pair_tenor_counts = defaultdict(lambda: defaultdict(int))
 
     def initialize(self):
         """Initialize backtester with data loader and models"""
@@ -191,6 +247,9 @@ class FXOptionsBacktester:
         print(f"Total trading days: {total_days}")
 
         for day_idx, current_date in enumerate(business_days):
+            # Skip if optimizing and beyond IS end
+            if self.config.is_end_date and current_date > self.config.end_date:
+                break
             try:
                 self._process_trading_day(current_date)
 
@@ -223,9 +282,13 @@ class FXOptionsBacktester:
 
         # 2. MARK-TO-MARKET EXISTING POSITIONS
         mtm_pnl = self._mark_to_market_positions(current_date)
+        self.unrealized_pnl += mtm_pnl
 
         # 3. SCAN FOR NEW OPPORTUNITIES
-        new_positions = self._scan_for_opportunities(current_date)
+        if self.stop_trading:
+            new_positions = []
+        else:
+            new_positions = self._scan_for_opportunities(current_date)
         daily_trade_count = len(new_positions)
         self.active_positions.extend(new_positions)
 
@@ -249,6 +312,21 @@ class FXOptionsBacktester:
             daily_pnl=daily_pnl
         )
 
+        # Evaluate position exits
+        self._evaluate_position_exits(current_date)
+
+        # After snapshot risk checks
+        self._risk_checks()
+
+        # After equity update record PnL series
+        self.results.realized_pnl_series.append({'date': current_date, 'realized': self.realized_pnl})
+        self.results.unrealized_pnl_series.append({'date': current_date, 'unrealized': self.unrealized_pnl})
+        if hedging_pnl != 0:
+            self.results.hedge_pnl_series.append({'date': current_date, 'hedge_pnl': hedging_pnl})
+
+        # Risk analytics
+        self._risk_analytics(current_date)
+
     def _expire_positions(self, current_date):
         """Handle position expiries and calculate P&L"""
         total_pnl = 0
@@ -258,6 +336,8 @@ class FXOptionsBacktester:
             if current_date >= position['expiry_date']:
                 pnl = self._calculate_expiry_pnl(position, current_date)
                 total_pnl += pnl
+                # Release margin
+                self.margin_used -= position.get('margin',0)
                 positions_to_remove.append(idx)
 
         # Remove expired positions
@@ -324,6 +404,13 @@ class FXOptionsBacktester:
 
             self.results.expired_positions.append(expired_record)
 
+            if hasattr(self, 'realized_pnl'):
+                self.realized_pnl += pnl
+
+            # decrement per-pair counters
+            self.per_pair_counts[position['pair']] -= 1
+            self.per_pair_tenor_counts[position['pair']][position['tenor']] -= 1
+
             return pnl
 
         except Exception as e:
@@ -331,9 +418,33 @@ class FXOptionsBacktester:
             return 0
 
     def _mark_to_market_positions(self, current_date):
-        """Mark existing positions to market"""
-        # Simplified MTM - could be enhanced with full Black-Scholes
-        return 0
+        """Mark existing positions to market using Black-Scholes price change since last mark."""
+        mtm_pnl = 0.0
+        spot_cache = {}
+        for position in self.active_positions:
+            # Skip already expired positions (they get handled in expiry logic)
+            if current_date >= position['expiry_date']:
+                continue
+            pair = position['pair']
+            if pair not in spot_cache:
+                vol_data = self.loader.get_volatility_surface(pair, current_date)
+                if vol_data is None:
+                    continue
+                spot_cache[pair] = vol_data.spot
+            spot = spot_cache[pair]
+            T_days = max((position['expiry_date'] - current_date).days, 0)
+            if T_days == 0:
+                continue
+            # Use stored market vol (could be updated with smile model)
+            vol = position['market_vol']
+            current_price = self._price_option(spot, position['strike'], T_days/365, vol, position['option_type'])
+            last_price = position.get('last_price', position['premium_paid']/position['notional'] if position['notional']>0 else current_price)
+            direction = 1 if position['position_type']=='long' else -1
+            pnl_increment = direction * (current_price - last_price) * position['notional']
+            mtm_pnl += pnl_increment
+            position['last_price'] = current_price
+        # now returns incremental unrealized pnl
+        return mtm_pnl
 
     def _scan_for_opportunities(self, current_date):
         """Scan all pairs for trading opportunities using core strategy identify_opportunities"""
@@ -359,14 +470,24 @@ class FXOptionsBacktester:
                     spot=vol_data.spot,
                     date=current_date
                 )
+                # Restrict to top N per pair
+                signals = signals[:self.config.max_signals_per_pair]
                 for signal in signals:
-                    if signal.pair == "":
-                        signal.pair = pair
-                    if len(new_positions) >= self.config.max_daily_trades:
+                    # Per pair / tenor limits
+                    if self.per_pair_counts[pair] >= self.config.per_pair_position_limit:
+                        break
+                    if self.per_pair_tenor_counts[pair][signal.tenor] >= self.config.per_tenor_position_limit:
+                        continue
+                    # Margin / equity / position cap checks
+                    if len(self.active_positions) + len(new_positions) >= self.config.max_positions:
                         break
                     position = self._execute_trade(signal, vol_data, current_date, pair)
                     if position:
+                        self.per_pair_counts[pair] += 1
+                        self.per_pair_tenor_counts[pair][signal.tenor] += 1
                         new_positions.append(position)
+                        if len(new_positions) >= self.config.max_daily_trades:
+                            break
             except Exception:
                 continue
         return new_positions
@@ -379,25 +500,30 @@ class FXOptionsBacktester:
     def _generate_surfaces(self, vol_data, current_date):
         """Generate market and model volatility surfaces from ATM, RR, BF inputs.
         Output format matches strategy expectations: tenor -> {'vol': vol}.
-        """
+        Skips any tenor with missing/invalid ATM vol values."""
         market_surface = {}
         model_surface = {}
         tenors = ["1W", "2W", "3W", "1M", "2M", "3M", "4M", "6M", "9M", "12M"]
         for tenor in tenors:
             if tenor in vol_data.atm_vols:
-                atm = vol_data.atm_vols[tenor]  # already in decimal (e.g. 0.105)
-                # Market surface uses provided ATM vol directly
-                market_surface[tenor] = {'vol': atm}
-                # Build a simple fair value model vol using RR/BF if available
-                rr = vol_data.rr_25d.get(tenor, 0.0)
-                bf = vol_data.bf_25d.get(tenor, 0.0)
-                # Approximate synthetic model adjustment: remove half RR impact and butterfly
-                # Model vol slightly smoothed toward long-term mean (simple EMA style)
+                atm = vol_data.atm_vols[tenor]
+                # Validate atm volatility
+                if atm is None or not np.isfinite(atm) or atm <= 0:
+                    continue
+                rr = vol_data.rr_25d.get(tenor, 0.0) or 0.0
+                bf = vol_data.bf_25d.get(tenor, 0.0) or 0.0
+                # Ensure rr/bf are numeric
+                try:
+                    rr = float(rr)
+                    bf = float(bf)
+                except (TypeError, ValueError):
+                    rr, bf = 0.0, 0.0
+                if not np.isfinite(rr): rr = 0.0
+                if not np.isfinite(bf): bf = 0.0
+                market_surface[tenor] = {'vol': float(atm)}
                 adj = -0.25 * rr - 0.5 * bf
                 base_model = atm + adj
-                # Clamp to reasonable bounds
                 base_model = float(np.clip(base_model, 0.01, 0.80))
-                # Small deterministic variation to avoid identical vols (hash based)
                 variation = (hash((tenor, int(current_date.strftime('%Y%m%d')))) % 7) / 10000.0
                 model_vol = max(0.0001, base_model * (1 - 0.005) + variation)
                 model_surface[tenor] = {'vol': model_vol}
@@ -406,146 +532,329 @@ class FXOptionsBacktester:
     def _execute_trade(self, signal, vol_data, current_date, pair):
         """Execute a trading signal"""
         try:
-            T = self._tenor_to_years(signal.tenor)
-            market_vol = signal.market_vol if isinstance(signal.market_vol, (int, float)) else signal.market_vol
-            # Strategy's signal stores raw vol in signal.market_vol (already decimal)
+            # Derive time to expiry in years
+            T = None
+            if hasattr(signal, 'tenor') and signal.tenor:
+                T = self._tenor_to_years(signal.tenor)
+            if (T is None or T <= 0) and hasattr(signal, 'expiry'):
+                T = max((signal.expiry - current_date).days, 1)/365
+            if T is None or T <= 0:
+                T = 1/12  # fallback 1M
+            market_vol = signal.market_vol if isinstance(signal.market_vol, (int, float)) else getattr(signal.market_vol, 'vol', None)
+            if market_vol is None or market_vol <= 0:
+                return None
             spot = vol_data.spot
-            strike = signal.strike
+            strike = signal.strike if getattr(signal, 'strike', None) else spot
             r = 0.02
-            option_price = self._price_option(spot, strike, T, market_vol, signal.option_type, r)
-            max_position_value = self.current_equity * self.config.max_position_size
+            option_price = self._price_option(spot, strike, T, market_vol, getattr(signal, 'option_type','call'), r)
             if option_price <= 0:
                 return None
-            position_size = min(max_position_value / option_price, 100000)
-            notional = position_size
+            max_position_value = self.current_equity * self.config.max_position_size
+            if max_position_value <= 0 or self.stop_trading:
+                return None
+            direction = -1 if getattr(signal, 'signal_type', None) and signal.signal_type.value == 'overpriced' else 1
+            notional = min(max_position_value / option_price, 20000)
+            margin = 0.0
+            if direction == -1:
+                margin = spot * notional * self.config.margin_requirement
+                if self.margin_used + margin > self.current_equity * 0.9:
+                    return None
             total_premium = option_price * notional
-            if signal.signal_type.value == 'overpriced':
-                position_type = 'short'
-                premium_received = total_premium
-                premium_paid = 0
+            if direction == -1:
                 self.current_equity += total_premium * (1 - self.config.commission)
             else:
-                position_type = 'long'
-                premium_paid = total_premium
-                premium_received = 0
-                self.current_equity -= total_premium * (1 + self.config.commission)
+                cash_out = total_premium * (1 + self.config.commission)
+                if cash_out > self.current_equity * 0.99:
+                    return None
+                self.current_equity -= cash_out
+            self.margin_used += margin
             position = {
                 'id': f"{pair}_{self.position_counter}",
                 'pair': pair,
-                'option_type': signal.option_type,
-                'position_type': position_type,
+                'option_type': getattr(signal, 'option_type','call'),
+                'position_type': 'short' if direction==-1 else 'long',
                 'strike': strike,
-                'tenor': signal.tenor,
+                'tenor': getattr(signal, 'tenor',''),
                 'expiry_date': current_date + pd.Timedelta(days=int(T * 365)),
                 'notional': notional,
-                'market_vol': signal.market_vol,
-                'model_vol': signal.model_vol,
-                'premium_paid': premium_paid,
-                'premium_received': premium_received,
+                'market_vol': market_vol,
+                'model_vol': getattr(signal, 'model_vol', market_vol),
+                'premium_paid': total_premium if direction==1 else 0,
+                'premium_received': total_premium if direction==-1 else 0,
                 'entry_date': current_date,
-                'entry_spot': spot
+                'entry_spot': spot,
+                'last_price': option_price,
+                'margin': margin
             }
             self.position_counter += 1
             self.results.trades.append(position.copy())
             return position
-
         except Exception as e:
             print(f"Error executing trade: {e}")
             return None
 
     def _price_option(self, S, K, T, vol, option_type='call', r=0.02):
-        """Black-Scholes option pricing"""
+        """Black-Scholes option pricing with robust input validation."""
         from scipy.stats import norm
         import math
-
-        if T <= 0 or vol <= 0:
+        # Validate inputs
+        if (T is None) or (vol is None) or (S is None) or (K is None):
             return 0.0001
-
+        try:
+            T = float(T)
+            vol = float(vol)
+            S = float(S)
+            K = float(K)
+        except (TypeError, ValueError):
+            return 0.0001
+        if T <= 0 or vol <= 0 or S <= 0 or K <= 0:
+            return 0.0001
         try:
             d1 = (math.log(S/K) + (r + 0.5*vol**2)*T) / (vol*math.sqrt(T))
             d2 = d1 - vol*math.sqrt(T)
-
             if option_type == 'call':
                 price = S * norm.cdf(d1) - K * math.exp(-r*T) * norm.cdf(d2)
-            else:  # put
+            else:
                 price = K * math.exp(-r*T) * norm.cdf(-d2) - S * norm.cdf(-d1)
-
-            return max(price, 0.0001)  # Minimum price
-
-        except:
-            return 0.0001  # Fallback price
+            return max(price, 0.0001)
+        except Exception:
+            return 0.0001
 
     def _perform_delta_hedging(self, current_date):
-        """Perform portfolio delta hedging by maturity buckets"""
-        hedging_cost = 0
-
-        # Calculate delta exposures by pair and maturity
-        delta_exposures = defaultdict(lambda: defaultdict(float))
-
+        """Perform simple delta hedging; neutralize per pair above threshold."""
+        if self.stop_trading:
+            return 0
+        pair_delta = {}
+        spot_cache = {}
         for position in self.active_positions:
+            if current_date >= position['expiry_date']:
+                continue
             pair = position['pair']
-            tenor = position['tenor']
-            notional = position['notional']
-
-            # Simple delta calculation (could be enhanced)
-            delta = 0.5 * notional if position['option_type'] == 'call' else -0.5 * notional
-
-            if position['position_type'] == 'short':
-                delta = -delta
-
-            delta_exposures[pair][tenor] += delta
-
-        # Check for hedging needs
-        for pair, buckets in delta_exposures.items():
-            for tenor, delta_exposure in buckets.items():
-                # Hedge if delta exposure exceeds threshold
-                if abs(delta_exposure) > self.config.delta_threshold * self.current_equity:
-                    hedging_cost += abs(delta_exposure) * 0.001  # Simple hedging cost
-
-        return -hedging_cost  # Cost reduces P&L
+            if pair not in spot_cache:
+                vol_data = self.loader.get_volatility_surface(pair, current_date)
+                if vol_data is None:
+                    continue
+                spot_cache[pair] = vol_data.spot
+            spot = spot_cache[pair]
+            T_days = max((position['expiry_date'] - current_date).days,0)
+            if T_days == 0:
+                continue
+            vol = position['market_vol']
+            delta = self._option_delta(spot, position['strike'], T_days/365, vol, position['option_type'])
+            direction = 1 if position['position_type']=='long' else -1
+            pair_delta[pair] = pair_delta.get(pair,0) + delta * direction * position['notional'] * spot
+        hedging_cost = 0.0
+        threshold = self.config.delta_threshold * self.current_equity
+        for pair, d_exposure in pair_delta.items():
+            if abs(d_exposure) > threshold:
+                # Hedge the excess
+                hedge_size = -d_exposure / spot_cache[pair]
+                # Assume zero slippage & small cost
+                cost = abs(hedge_size) * spot_cache[pair] * 0.0001
+                hedging_cost += cost
+                self.results.hedge_trades.append({'date': current_date,'pair':pair,'hedge_size':hedge_size,'cost':cost})
+        hedge_cost = -hedging_cost
+        if hedge_cost != 0:
+            self.realized_pnl += hedge_cost
+        return -hedging_cost
 
     def _calculate_portfolio_greeks(self, current_date):
         """Calculate portfolio Greeks by maturity bucket"""
-        total_delta = 0
-        total_vega = 0
-        total_gamma = 0
-        total_theta = 0
-
+        # Replace simplified approximations with BS greeks per position
+        total_delta = total_gamma = total_vega = total_theta = 0.0
+        spot_cache = {}
         for position in self.active_positions:
-            # Simple Greeks estimation
-            notional = position['notional']
-            days_to_expiry = (position['expiry_date'] - current_date).days
+            if current_date >= position['expiry_date']:
+                continue
+            pair = position['pair']
+            if pair not in spot_cache:
+                vol_data = self.loader.get_volatility_surface(pair, current_date)
+                if vol_data is None:
+                    continue
+                spot_cache[pair] = vol_data.spot
+            S = spot_cache[pair]
+            T_days = (position['expiry_date'] - current_date).days
+            if T_days <= 0:
+                continue
+            T = T_days / 365
+            vol = position['market_vol']
+            delta, gamma, vega, theta = self._bs_greeks(S, position['strike'], vol, T, position['option_type'])
+            direction = 1 if position['position_type']=='long' else -1
+            total_delta += delta * direction * position['notional']
+            total_gamma += gamma * direction * position['notional']
+            total_vega += vega * direction * position['notional']
+            total_theta += theta * direction * position['notional']
+        return {'delta': total_delta,'gamma': total_gamma,'vega': total_vega,'theta': total_theta}
 
-            if days_to_expiry > 0:
-                # Simple approximations (could be enhanced with proper Greeks)
-                pos_delta = 0.5 * notional if position['option_type'] == 'call' else -0.5 * notional
-                pos_vega = notional * 0.01  # Simplified vega
-                pos_gamma = notional * 0.001  # Simplified gamma
-                pos_theta = -notional * 0.001  # Simplified theta
+    def _bs_greeks(self, S, K, vol, T, option_type):
+        import math
+        from math import erf, sqrt, exp, log
+        if T<=0 or vol<=0 or S<=0 or K<=0:
+            return 0,0,0,0
+        d1 = (log(S/K)+(0.5*vol*vol)*T)/(vol*sqrt(T))
+        d2 = d1 - vol*sqrt(T)
+        # normal pdf/cdf
+        pdf = (1/np.sqrt(2*np.pi))*np.exp(-0.5*d1*d1)
+        cdf = 0.5*(1+erf(d1/np.sqrt(2)))
+        if option_type=='call':
+            delta = cdf
+            theta_sign = -1
+        else:
+            delta = cdf - 1
+            theta_sign = -1
+        gamma = pdf/(S*vol*sqrt(T))
+        vega = S*pdf*sqrt(T) / 100.0  # per 1 vol point (percentage)
+        theta = theta_sign * (pdf*S*vol/(2*sqrt(T)))/365
+        return delta, gamma, vega, theta
 
-                if position['position_type'] == 'short':
-                    pos_delta = -pos_delta
-                    pos_vega = -pos_vega
-                    pos_gamma = -pos_gamma
-                    pos_theta = -pos_theta
+    def _risk_checks(self):
+        """Apply portfolio level risk controls (drawdown, equity floor, margin)."""
+        if self.current_equity <= 0:
+            self.current_equity = 0
+            self.stop_trading = True
+        # Drawdown based throttle
+        peak_equity = max(e['equity'] for e in self.results.equity_curve) if self.results.equity_curve else self.config.initial_capital
+        dd = (peak_equity - self.current_equity)/peak_equity if peak_equity>0 else 0
+        if dd > self.config.max_drawdown:
+            # Halt new trading if breach
+            self.stop_trading = True
+        # Margin breach
+        if self.margin_used > self.current_equity * 0.9:  # Hard cap: margin cannot exceed 90% equity
+            self.stop_trading = True
 
-                total_delta += pos_delta
-                total_vega += pos_vega
-                total_gamma += pos_gamma
-                total_theta += pos_theta
+        # Add margin utilization metric to results metrics progressively
+        if self.results.equity_curve:
+            self.results.metrics['avg_margin_utilization'] = float(np.mean([
+                s.get('margin_used',0)/s['equity'] if s['equity']>0 else 0 for s in self.results.daily_snapshots
+            ]))
+        # Store realized/unrealized in metrics (rolling overwrite ok)
+        self.results.metrics['realized_pnl'] = self.realized_pnl
+        self.results.metrics['unrealized_pnl'] = self.unrealized_pnl
+        self.results.metrics['hedge_pnl'] = sum(h['hedge_pnl'] for h in self.results.hedge_pnl_series) if self.results.hedge_pnl_series else 0
 
-        return {
-            'delta': total_delta,
-            'gamma': total_gamma,
-            'vega': total_vega,
-            'theta': total_theta
-        }
+        # Additional drawdown guard: if stop_trading set, liquidate remaining after hedging logic not implemented here
+        return
 
-    def _tenor_to_years(self, tenor):
-        """Convert tenor string to years"""
-        tenor_map = {
-            "1W": 1/52, "2W": 2/52, "3W": 3/52,
-            "1M": 1/12, "2M": 2/12, "3M": 3/12,
-            "6M": 6/12, "9M": 9/12, "1Y": 1.0
-        }
-        return tenor_map.get(tenor, 1/12)
+    def _debug_data_structure(self, pair):
+        """Debug helper to inspect pair data once."""
+        try:
+            pair_data = self.loader.load_pair_data(pair)
+            print(f"DEBUG {pair}: rows={len(pair_data)} cols={len(pair_data.columns)} range={pair_data.index.min().date()}->{pair_data.index.max().date()}")
+        except Exception as e:
+            print(f"DEBUG load fail {pair}: {e}")
+        return True
+
+    def _option_delta(self, S, K, T, vol, option_type):
+        """Calculate option delta using Black-Scholes formula"""
+        from math import exp, log, sqrt
+        from scipy.stats import norm
+
+        if T <= 0 or vol <= 0:
+            return 0
+
+        d1 = (log(S / K) + (0.5 * vol ** 2) * T) / (vol * sqrt(T))
+        cdf = norm.cdf(d1)
+
+        # Provide consistent delta with _bs_greeks
+        if option_type=='call':
+            return cdf
+        else:
+            return cdf-1
+
+    def _evaluate_position_exits(self, current_date):
+        """Early exit logic based on reduced vol edge or time decay."""
+        to_close = []
+        spot_cache = {}
+        for idx, position in enumerate(self.active_positions):
+            if current_date >= position['expiry_date']:
+                continue
+            pair = position['pair']
+            if pair not in spot_cache:
+                vol_data = self.loader.get_volatility_surface(pair, current_date)
+                if not vol_data:
+                    continue
+                spot_cache[pair] = vol_data.spot
+                current_atm_vols = vol_data.atm_vols
+            # Get fresh market vol for tenor
+            tenor = position['tenor']
+            if tenor in vol_data.atm_vols:
+                new_market_vol = vol_data.atm_vols[tenor]
+                edge = abs(new_market_vol - position['model_vol'])
+                if edge < self.config.close_vol_edge_factor * self.config.vol_threshold:
+                    to_close.append((idx, new_market_vol, 'edge_reverted'))
+            # Time stop (e.g. if < 10% life remaining)
+            life_frac = (position['expiry_date'] - current_date).days / max((position['expiry_date'] - position['entry_date']).days,1)
+            if life_frac < 0.1:
+                if (idx, position.get('market_vol'), 'edge_reverted') not in to_close:
+                    to_close.append((idx, position.get('market_vol'), 'time_stop'))
+        for offset, (idx, mvol, reason) in enumerate(to_close):
+            real_idx = idx - offset  # adjust for prior pops
+            if 0 <= real_idx < len(self.active_positions):
+                self._early_close_position(real_idx, current_date, mvol, reason)
+
+    def _early_close_position(self, idx, current_date, market_vol, reason):
+        try:
+            position = self.active_positions[idx]
+            pair_data = self.loader.load_pair_data(position['pair'])
+            spot_col = f"{position['pair']} Curncy"
+            if spot_col not in pair_data.columns:
+                spot_col = pair_data.columns[0]
+            available_dates = pair_data.index
+            closest = min(available_dates, key=lambda d: abs((d-current_date).days))
+            spot = pair_data.loc[closest, spot_col]
+            T_days = max((position['expiry_date'] - current_date).days,0)
+            T = T_days/365
+            vol = market_vol if (market_vol and market_vol>0) else position.get('market_vol', 0.0001)
+            price = self._price_option(spot, position['strike'], T, vol, position['option_type'])
+            if position['position_type']=='long':
+                pnl = price*position['notional'] - position['premium_paid']
+            else:
+                pnl = position['premium_received'] - price*position['notional']
+            self.realized_pnl += pnl
+            self.margin_used -= position.get('margin',0)
+            closed = {**position, 'close_reason': reason, 'close_date': current_date, 'pnl': pnl}
+            self.results.closed_positions.append(closed)
+            self.per_pair_counts[position['pair']] = max(0, self.per_pair_counts[position['pair']] - 1)
+            self.per_pair_tenor_counts[position['pair']][position['tenor']] = max(0, self.per_pair_tenor_counts[position['pair']][position['tenor']] - 1)
+            self.active_positions.pop(idx)
+        except Exception:
+            pass
+
+    def _risk_analytics(self, current_date):
+        """Compute daily VaR / ES and tag volatility regime."""
+        if len(self.results.equity_curve) < 30:
+            return
+        eq_series = pd.Series([e['equity'] for e in self.results.equity_curve])
+        rets = eq_series.pct_change().dropna()
+        window = 60
+        if len(rets) < window:
+            window = len(rets)
+        recent = rets.tail(window)
+        if recent.empty:
+            return
+        mu = recent.mean()
+        sigma = recent.std()
+        for lvl in [0.95, 0.99]:
+            z = abs(pd.Series([mu]).quantile(0) - sigma * {0.95:1.645,0.99:2.326}[lvl])
+        # Parametric VaR (positive number)
+        var_95 = sigma*1.645*np.sqrt(1)
+        var_99 = sigma*2.326*np.sqrt(1)
+        hist_var_95 = abs(np.percentile(recent,5))
+        hist_var_99 = abs(np.percentile(recent,1))
+        es_95 = abs(recent[recent <= np.percentile(recent,5)].mean()) if (recent <= np.percentile(recent,5)).any() else hist_var_95
+        es_99 = abs(recent[recent <= np.percentile(recent,1)].mean()) if (recent <= np.percentile(recent,1)).any() else hist_var_99
+        self.results.var_history.append({'date': current_date,'parametric_95':var_95,'parametric_99':var_99,'hist_95':hist_var_95,'hist_99':hist_var_99})
+        self.results.es_history.append({'date': current_date,'es_95':es_95,'es_99':es_99})
+        # Regime tagging using rolling realized vol percentile
+        realized_30 = rets.tail(30).std() if len(rets)>=30 else sigma
+        long_hist = rets.std()
+        regime = 'high_vol' if realized_30 > rets.quantile(0.75) else ('low_vol' if realized_30 < rets.quantile(0.25) else 'normal')
+        self.results.regime_tags.append({'date': current_date,'regime':regime,'realized30':realized_30})
+        # Store in metrics (overwrite acceptable)
+        self.results.metrics['latest_VaR95'] = var_95
+        self.results.metrics['latest_ES95'] = es_95
+        self.results.metrics['vol_regime'] = regime
+
+    def _tenor_to_years(self, tenor: str) -> float:
+        mapping = {"1W":7/365,"2W":14/365,"3W":21/365,"1M":1/12,"2M":2/12,"3M":3/12,"4M":4/12,"6M":6/12,"9M":9/12,"12M":1.0,"1Y":1.0}
+        return mapping.get(tenor, 1/12)
