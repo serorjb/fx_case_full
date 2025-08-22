@@ -8,8 +8,8 @@ from vgvv_backtest import VGVVSmileBacktester
 def main():
     ensure_rates()
     loader = FXDataLoader()
-    # pairs = ['EURUSD', 'USDJPY', 'XAUUSD', 'GBPUSD', 'USDCAD', 'USDCHF', 'NZDUSD']
-    pairs = ['ALL']
+    pairs = ['EURUSD', 'USDJPY', 'XAUUSD', 'GBPUSD', 'USDCAD', 'USDCHF', 'NZDUSD']
+    # pairs = ['ALL']
     start = '2019-09-01'
     end = '2024-12-31'
 

@@ -6,6 +6,48 @@
   <component name="ChangeListManager">
     <list default="true" id="637e7064-2d68-4de1-8449-ece28e37a35d" name="Changes" comment="-">
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/main.py" beforeDir="false" afterPath="$PROJECT_DIR$/main.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/results/sabr_capacity_utilization_return.png" beforeDir="false" afterPath="$PROJECT_DIR$/results/sabr_capacity_utilization_return.png" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/results/sabr_capacity_utilization_sortino.png" beforeDir="false" afterPath="$PROJECT_DIR$/results/sabr_capacity_utilization_sortino.png" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/results/sabr_daily_equity_return.csv" beforeDir="false" afterPath="$PROJECT_DIR$/results/sabr_daily_equity_return.csv" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/results/sabr_daily_equity_sortino.csv" beforeDir="false" afterPath="$PROJECT_DIR$/results/sabr_daily_equity_sortino.csv" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/results/sabr_drawdown.png" beforeDir="false" afterPath="$PROJECT_DIR$/results/sabr_drawdown.png" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/results/sabr_equity_curve.png" beforeDir="false" afterPath="$PROJECT_DIR$/results/sabr_equity_curve.png" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/results/sabr_greeks_return.csv" beforeDir="false" afterPath="$PROJECT_DIR$/results/sabr_greeks_return.csv" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/results/sabr_greeks_return.png" beforeDir="false" afterPath="$PROJECT_DIR$/results/sabr_greeks_return.png" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/results/sabr_greeks_sortino.csv" beforeDir="false" afterPath="$PROJECT_DIR$/results/sabr_greeks_sortino.csv" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/results/sabr_greeks_sortino.png" beforeDir="false" afterPath="$PROJECT_DIR$/results/sabr_greeks_sortino.png" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/results/sabr_pair_new_trades_return.csv" beforeDir="false" afterPath="$PROJECT_DIR$/results/sabr_pair_new_trades_return.csv" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/results/sabr_pair_new_trades_sortino.csv" beforeDir="false" afterPath="$PROJECT_DIR$/results/sabr_pair_new_trades_sortino.csv" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/results/sabr_pair_new_trades_timeseries.png" beforeDir="false" afterPath="$PROJECT_DIR$/results/sabr_pair_new_trades_timeseries.png" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/results/sabr_pair_open_timeseries.png" beforeDir="false" afterPath="$PROJECT_DIR$/results/sabr_pair_open_timeseries.png" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/results/sabr_pair_open_trades_return.csv" beforeDir="false" afterPath="$PROJECT_DIR$/results/sabr_pair_open_trades_return.csv" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/results/sabr_pair_open_trades_sortino.csv" beforeDir="false" afterPath="$PROJECT_DIR$/results/sabr_pair_open_trades_sortino.csv" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/results/sabr_tenor_performance_return.csv" beforeDir="false" afterPath="$PROJECT_DIR$/results/sabr_tenor_performance_return.csv" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/results/sabr_tenor_performance_sortino.csv" beforeDir="false" afterPath="$PROJECT_DIR$/results/sabr_tenor_performance_sortino.csv" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/results/sabr_tenor_weights.png" beforeDir="false" afterPath="$PROJECT_DIR$/results/sabr_tenor_weights.png" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/results/sabr_theta_pnl_return.csv" beforeDir="false" afterPath="$PROJECT_DIR$/results/sabr_theta_pnl_return.csv" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/results/sabr_theta_pnl_sortino.csv" beforeDir="false" afterPath="$PROJECT_DIR$/results/sabr_theta_pnl_sortino.csv" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/results/sabr_trades_return.csv" beforeDir="false" afterPath="$PROJECT_DIR$/results/sabr_trades_return.csv" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/results/sabr_trades_sortino.csv" beforeDir="false" afterPath="$PROJECT_DIR$/results/sabr_trades_sortino.csv" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/results/sabr_vol_edges_distribution.png" beforeDir="false" afterPath="$PROJECT_DIR$/results/sabr_vol_edges_distribution.png" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/results/tearsheets/sabr_return.png" beforeDir="false" afterPath="$PROJECT_DIR$/results/tearsheets/sabr_return.png" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/results/tearsheets/sabr_sortino.png" beforeDir="false" afterPath="$PROJECT_DIR$/results/tearsheets/sabr_sortino.png" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/results/tearsheets/vgvv_return.png" beforeDir="false" afterPath="$PROJECT_DIR$/results/tearsheets/vgvv_return.png" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/results/vgvv_capacity_utilization_return.png" beforeDir="false" afterPath="$PROJECT_DIR$/results/vgvv_capacity_utilization_return.png" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/results/vgvv_daily_equity_return.csv" beforeDir="false" afterPath="$PROJECT_DIR$/results/vgvv_daily_equity_return.csv" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/results/vgvv_drawdown.png" beforeDir="false" afterPath="$PROJECT_DIR$/results/vgvv_drawdown.png" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/results/vgvv_equity_curve.png" beforeDir="false" afterPath="$PROJECT_DIR$/results/vgvv_equity_curve.png" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/results/vgvv_greeks_return.csv" beforeDir="false" afterPath="$PROJECT_DIR$/results/vgvv_greeks_return.csv" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/results/vgvv_greeks_return.png" beforeDir="false" afterPath="$PROJECT_DIR$/results/vgvv_greeks_return.png" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/results/vgvv_pair_new_trades_return.csv" beforeDir="false" afterPath="$PROJECT_DIR$/results/vgvv_pair_new_trades_return.csv" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/results/vgvv_pair_new_trades_timeseries.png" beforeDir="false" afterPath="$PROJECT_DIR$/results/vgvv_pair_new_trades_timeseries.png" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/results/vgvv_pair_open_timeseries.png" beforeDir="false" afterPath="$PROJECT_DIR$/results/vgvv_pair_open_timeseries.png" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/results/vgvv_pair_open_trades_return.csv" beforeDir="false" afterPath="$PROJECT_DIR$/results/vgvv_pair_open_trades_return.csv" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/results/vgvv_tenor_performance_return.csv" beforeDir="false" afterPath="$PROJECT_DIR$/results/vgvv_tenor_performance_return.csv" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/results/vgvv_tenor_weights.png" beforeDir="false" afterPath="$PROJECT_DIR$/results/vgvv_tenor_weights.png" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/results/vgvv_theta_pnl_return.csv" beforeDir="false" afterPath="$PROJECT_DIR$/results/vgvv_theta_pnl_return.csv" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/results/vgvv_trades_return.csv" beforeDir="false" afterPath="$PROJECT_DIR$/results/vgvv_trades_return.csv" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/sabr_backtest.py" beforeDir="false" afterPath="$PROJECT_DIR$/sabr_backtest.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/vgvv_backtest.py" beforeDir="false" afterPath="$PROJECT_DIR$/vgvv_backtest.py" afterDir="false" />
     </list>
@@ -35,6 +77,7 @@
   </component>
   <component name="PropertiesComponent"><![CDATA[{
   "keyToString": {
+    "ASKED_SHARE_PROJECT_CONFIGURATION_FILES": "true",
     "Python.allocator.executor": "Run",
     "Python.backtest.executor": "Run",
     "Python.build_rates.executor": "Run",
@@ -77,7 +120,7 @@
       <recent name="C:\Dev\fx_case_full\config" />
     </key>
   </component>
-  <component name="RunManager" selected="Python.main (1)">
+  <component name="RunManager" selected="Python.vgvv_backtest">
     <configuration name="main (1)" type="PythonConfigurationType" factoryName="Python" temporary="true" nameIsGenerated="true">
       <module name="fx_case_full" />
       <option name="ENV_FILES" value="" />
@@ -190,9 +233,9 @@
     </configuration>
     <recent_temporary>
       <list>
-        <item itemvalue="Python.main (1)" />
-        <item itemvalue="Python.sabr_backtest" />
         <item itemvalue="Python.vgvv_backtest" />
+        <item itemvalue="Python.sabr_backtest" />
+        <item itemvalue="Python.main (1)" />
         <item itemvalue="Python.tearsheet" />
         <item itemvalue="Python.main" />
       </list>
@@ -463,7 +506,15 @@
       <option name="project" value="LOCAL" />
       <updated>1755875472729</updated>
     </task>
-    <option name="localTasksCounter" value="33" />
+    <task id="LOCAL-00033" summary="-">
+      <option name="closed" value="true" />
+      <created>1755876529605</created>
+      <option name="number" value="00033" />
+      <option name="presentableId" value="LOCAL-00033" />
+      <option name="project" value="LOCAL" />
+      <updated>1755876529605</updated>
+    </task>
+    <option name="localTasksCounter" value="34" />
     <servers />
   </component>
   <component name="VcsManagerConfiguration">

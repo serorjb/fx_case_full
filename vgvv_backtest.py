@@ -653,5 +653,5 @@ if __name__ == '__main__':
     loader = FXDataLoader()
     pairs = ['ALL']
     # Start 3 months earlier; report from 2007-01-01
-    bt_r = VGVVSmileBacktester(loader, pairs, '2006-09-01','2024-12-31', allocation_mode='return', report_start_date='2007-01-01'); bt_r.run()
-    bt_s = VGVVSmileBacktester(loader, pairs, '2006-09-01','2024-12-31', allocation_mode='sortino', report_start_date='2007-01-01'); bt_s.run()
+    bt_r = VGVVSmileBacktester(loader, pairs, '2019-09-01','2024-12-31', allocation_mode='return', report_start_date='2020-01-01'); bt_r.run()
+    bt_s = VGVVSmileBacktester(loader, pairs, '2019-09-01','2024-12-31', allocation_mode='sortino', report_start_date='2020-01-01'); bt_s.run()
