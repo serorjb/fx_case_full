@@ -91,12 +91,12 @@ class OptionTrade:
 class SABRSmileBacktester:
     def __init__(self, loader, pairs: List[str], start_date, end_date,
                  initial_capital: float = 10_000_000.0,
-                 min_vol_edge: float = 0.005,
-                 bid_ask: float = 0.0050,
+                 min_vol_edge: float = 0.0100,
+                 bid_ask: float = 0.0125,
                  commission: float = 0.0005,
                  slippage: float = 0.0002,
                  margin_rate: float = 0.20,
-                 daily_capital_fraction: float = 0.02,
+                 daily_capital_fraction: float = 0.025,
                  max_notional: float = 2_500_000.0,
                  allocation_mode: str = 'return', seed: int = 42,
                  use_moneyness_cost: bool = False,
@@ -305,7 +305,7 @@ class SABRSmileBacktester:
         d = self._delta(spot, trade.strike, T, trade.entry_vol, trade.domestic_rate, trade.foreign_rate, trade.option_type)
         if abs(d) > 0.04 and not trade.hedged:
             hedge_units = -d * trade.notional * trade.direction
-            cost = abs(hedge_units) * spot * 0.0001
+            cost = abs(hedge_units) * spot * 0.0002  # 0.02% cost of hedge notional
             self.equity -= cost
             trade.hedged = True
             trade.hedge_size = hedge_units
@@ -427,7 +427,7 @@ class SABRSmileBacktester:
                         desired_units = -d_now * tr.notional * tr.direction
                         dH = desired_units - tr.hedge_size
                         if abs(dH) > 1e-12:
-                            cost = abs(dH) * spot * 0.0001
+                            cost = abs(dH) * spot * 0.0002  # 0.02% cost of hedge notional
                             self.equity -= cost
                             day_pnl_by_tenor[tr.tenor] -= cost
                             # Update hedge position; adjust last_mark to include new units at current spot
@@ -680,5 +680,5 @@ if __name__ == '__main__':
     loader = FXDataLoader()
     pairs = ['ALL']
     # Start 3 months earlier; report from 2007-01-01
-    bt_r = SABRSmileBacktester(loader, pairs, '2006-09-01','2024-12-31', allocation_mode='return', report_start_date='2007-01-01'); bt_r.run()
-    bt_s = SABRSmileBacktester(loader, pairs, '2006-09-01','2024-12-31', allocation_mode='sortino', report_start_date='2007-01-01'); bt_s.run()
+    bt_r = SABRSmileBacktester(loader, pairs, '2019-09-01','2024-12-31', allocation_mode='return', report_start_date='2020-01-01'); bt_r.run()
+    bt_s = SABRSmileBacktester(loader, pairs, '2019-09-01','2024-12-31', allocation_mode='sortino', report_start_date='2020-01-01'); bt_s.run()

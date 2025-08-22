@@ -5,30 +5,48 @@
   </component>
   <component name="ChangeListManager">
     <list default="true" id="637e7064-2d68-4de1-8449-ece28e37a35d" name="Changes" comment="-">
-      <change afterPath="$PROJECT_DIR$/results/sabr_capacity_utilization_sortino.png" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/results/sabr_daily_equity_sortino.csv" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/results/sabr_greeks_sortino.csv" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/results/sabr_greeks_sortino.png" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/results/sabr_pair_new_trades_sortino.csv" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/results/sabr_pair_open_trades_sortino.csv" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/results/sabr_tenor_performance_sortino.csv" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/results/sabr_theta_pnl_sortino.csv" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/results/sabr_trades_sortino.csv" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/results/tearsheets/sabr_sortino.png" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/results/tearsheets/vgvv_sortino.png" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/results/vgvv_capacity_utilization_sortino.png" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/results/vgvv_daily_equity_sortino.csv" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/results/vgvv_greeks_sortino.csv" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/results/vgvv_greeks_sortino.png" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/results/vgvv_pair_new_trades_sortino.csv" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/results/vgvv_pair_open_trades_sortino.csv" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/results/vgvv_tenor_performance_sortino.csv" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/results/vgvv_theta_pnl_sortino.csv" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/results/vgvv_trades_sortino.csv" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/main.py" beforeDir="false" afterPath="$PROJECT_DIR$/main.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/results/sabr_capacity_utilization_return.png" beforeDir="false" afterPath="$PROJECT_DIR$/results/sabr_capacity_utilization_return.png" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/results/sabr_capacity_utilization_sortino.png" beforeDir="false" afterPath="$PROJECT_DIR$/results/sabr_capacity_utilization_sortino.png" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/results/sabr_daily_equity_return.csv" beforeDir="false" afterPath="$PROJECT_DIR$/results/sabr_daily_equity_return.csv" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/results/sabr_daily_equity_sortino.csv" beforeDir="false" afterPath="$PROJECT_DIR$/results/sabr_daily_equity_sortino.csv" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/results/sabr_drawdown.png" beforeDir="false" afterPath="$PROJECT_DIR$/results/sabr_drawdown.png" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/results/sabr_equity_curve.png" beforeDir="false" afterPath="$PROJECT_DIR$/results/sabr_equity_curve.png" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/results/sabr_greeks_return.csv" beforeDir="false" afterPath="$PROJECT_DIR$/results/sabr_greeks_return.csv" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/results/sabr_greeks_return.png" beforeDir="false" afterPath="$PROJECT_DIR$/results/sabr_greeks_return.png" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/results/sabr_greeks_sortino.csv" beforeDir="false" afterPath="$PROJECT_DIR$/results/sabr_greeks_sortino.csv" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/results/sabr_greeks_sortino.png" beforeDir="false" afterPath="$PROJECT_DIR$/results/sabr_greeks_sortino.png" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/results/sabr_tenor_performance_return.csv" beforeDir="false" afterPath="$PROJECT_DIR$/results/sabr_tenor_performance_return.csv" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/results/sabr_tenor_performance_sortino.csv" beforeDir="false" afterPath="$PROJECT_DIR$/results/sabr_tenor_performance_sortino.csv" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/results/sabr_tenor_weights.png" beforeDir="false" afterPath="$PROJECT_DIR$/results/sabr_tenor_weights.png" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/results/sabr_theta_pnl_return.csv" beforeDir="false" afterPath="$PROJECT_DIR$/results/sabr_theta_pnl_return.csv" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/results/sabr_theta_pnl_sortino.csv" beforeDir="false" afterPath="$PROJECT_DIR$/results/sabr_theta_pnl_sortino.csv" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/results/sabr_trades_return.csv" beforeDir="false" afterPath="$PROJECT_DIR$/results/sabr_trades_return.csv" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/results/sabr_trades_sortino.csv" beforeDir="false" afterPath="$PROJECT_DIR$/results/sabr_trades_sortino.csv" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/results/tearsheets/sabr_return.png" beforeDir="false" afterPath="$PROJECT_DIR$/results/tearsheets/sabr_return.png" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/results/tearsheets/sabr_sortino.png" beforeDir="false" afterPath="$PROJECT_DIR$/results/tearsheets/sabr_sortino.png" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/results/tearsheets/vgvv_return.png" beforeDir="false" afterPath="$PROJECT_DIR$/results/tearsheets/vgvv_return.png" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/results/tearsheets/vgvv_sortino.png" beforeDir="false" afterPath="$PROJECT_DIR$/results/tearsheets/vgvv_sortino.png" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/results/vgvv_capacity_utilization_return.png" beforeDir="false" afterPath="$PROJECT_DIR$/results/vgvv_capacity_utilization_return.png" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/results/vgvv_capacity_utilization_sortino.png" beforeDir="false" afterPath="$PROJECT_DIR$/results/vgvv_capacity_utilization_sortino.png" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/results/vgvv_daily_equity_return.csv" beforeDir="false" afterPath="$PROJECT_DIR$/results/vgvv_daily_equity_return.csv" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/results/vgvv_daily_equity_sortino.csv" beforeDir="false" afterPath="$PROJECT_DIR$/results/vgvv_daily_equity_sortino.csv" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/results/vgvv_drawdown.png" beforeDir="false" afterPath="$PROJECT_DIR$/results/vgvv_drawdown.png" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/results/vgvv_equity_curve.png" beforeDir="false" afterPath="$PROJECT_DIR$/results/vgvv_equity_curve.png" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/results/vgvv_greeks_return.csv" beforeDir="false" afterPath="$PROJECT_DIR$/results/vgvv_greeks_return.csv" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/results/vgvv_greeks_return.png" beforeDir="false" afterPath="$PROJECT_DIR$/results/vgvv_greeks_return.png" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/results/vgvv_greeks_sortino.csv" beforeDir="false" afterPath="$PROJECT_DIR$/results/vgvv_greeks_sortino.csv" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/results/vgvv_greeks_sortino.png" beforeDir="false" afterPath="$PROJECT_DIR$/results/vgvv_greeks_sortino.png" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/results/vgvv_tenor_performance_return.csv" beforeDir="false" afterPath="$PROJECT_DIR$/results/vgvv_tenor_performance_return.csv" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/results/vgvv_tenor_performance_sortino.csv" beforeDir="false" afterPath="$PROJECT_DIR$/results/vgvv_tenor_performance_sortino.csv" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/results/vgvv_tenor_weights.png" beforeDir="false" afterPath="$PROJECT_DIR$/results/vgvv_tenor_weights.png" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/results/vgvv_theta_pnl_return.csv" beforeDir="false" afterPath="$PROJECT_DIR$/results/vgvv_theta_pnl_return.csv" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/results/vgvv_theta_pnl_sortino.csv" beforeDir="false" afterPath="$PROJECT_DIR$/results/vgvv_theta_pnl_sortino.csv" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/results/vgvv_trades_return.csv" beforeDir="false" afterPath="$PROJECT_DIR$/results/vgvv_trades_return.csv" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/results/vgvv_trades_sortino.csv" beforeDir="false" afterPath="$PROJECT_DIR$/results/vgvv_trades_sortino.csv" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/sabr_backtest.py" beforeDir="false" afterPath="$PROJECT_DIR$/sabr_backtest.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/tearsheet.py" beforeDir="false" afterPath="$PROJECT_DIR$/tearsheet.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/vgvv_backtest.py" beforeDir="false" afterPath="$PROJECT_DIR$/vgvv_backtest.py" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
@@ -55,35 +73,36 @@
     <option name="hideEmptyMiddlePackages" value="true" />
     <option name="showLibraryContents" value="true" />
   </component>
-  <component name="PropertiesComponent">{
-  &quot;keyToString&quot;: {
-    &quot;Python.allocator.executor&quot;: &quot;Run&quot;,
-    &quot;Python.backtest.executor&quot;: &quot;Run&quot;,
-    &quot;Python.build_rates.executor&quot;: &quot;Run&quot;,
-    &quot;Python.config.executor&quot;: &quot;Run&quot;,
-    &quot;Python.config_io.executor&quot;: &quot;Run&quot;,
-    &quot;Python.costs.executor&quot;: &quot;Run&quot;,
-    &quot;Python.curve (1).executor&quot;: &quot;Run&quot;,
-    &quot;Python.discount_curves.executor&quot;: &quot;Run&quot;,
-    &quot;Python.draft (1).executor&quot;: &quot;Run&quot;,
-    &quot;Python.draft.executor&quot;: &quot;Run&quot;,
-    &quot;Python.draft2.executor&quot;: &quot;Run&quot;,
-    &quot;Python.draft_2.executor&quot;: &quot;Debug&quot;,
-    &quot;Python.main (1).executor&quot;: &quot;Run&quot;,
-    &quot;Python.plot_equity.executor&quot;: &quot;Run&quot;,
-    &quot;Python.quick_smoke.executor&quot;: &quot;Run&quot;,
-    &quot;Python.run_backtests.executor&quot;: &quot;Run&quot;,
-    &quot;Python.run_strategy.executor&quot;: &quot;Run&quot;,
-    &quot;Python.run_ultra_optimized.executor&quot;: &quot;Run&quot;,
-    &quot;Python.sabr_backtest.executor&quot;: &quot;Run&quot;,
-    &quot;Python.temp.executor&quot;: &quot;Run&quot;,
-    &quot;Python.temp_smoke.executor&quot;: &quot;Run&quot;,
-    &quot;Python.vgvv_backtest.executor&quot;: &quot;Run&quot;,
-    &quot;RunOnceActivity.ShowReadmeOnStart&quot;: &quot;true&quot;,
-    &quot;last_opened_file_path&quot;: &quot;C:/Dev/fx_case_full&quot;,
-    &quot;settings.editor.selected.configurable&quot;: &quot;promo.ai.assistant&quot;
+  <component name="PropertiesComponent"><![CDATA[{
+  "keyToString": {
+    "Python.allocator.executor": "Run",
+    "Python.backtest.executor": "Run",
+    "Python.build_rates.executor": "Run",
+    "Python.config.executor": "Run",
+    "Python.config_io.executor": "Run",
+    "Python.costs.executor": "Run",
+    "Python.curve (1).executor": "Run",
+    "Python.discount_curves.executor": "Run",
+    "Python.draft (1).executor": "Run",
+    "Python.draft.executor": "Run",
+    "Python.draft2.executor": "Run",
+    "Python.draft_2.executor": "Debug",
+    "Python.main (1).executor": "Run",
+    "Python.plot_equity.executor": "Run",
+    "Python.quick_smoke.executor": "Run",
+    "Python.run_backtests.executor": "Run",
+    "Python.run_strategy.executor": "Run",
+    "Python.run_ultra_optimized.executor": "Run",
+    "Python.sabr_backtest.executor": "Run",
+    "Python.tearsheet.executor": "Run",
+    "Python.temp.executor": "Run",
+    "Python.temp_smoke.executor": "Run",
+    "Python.vgvv_backtest.executor": "Run",
+    "RunOnceActivity.ShowReadmeOnStart": "true",
+    "last_opened_file_path": "C:/Dev/fx_case_full",
+    "settings.editor.selected.configurable": "promo.ai.assistant"
   }
-}</component>
+}]]></component>
   <component name="RecentsManager">
     <key name="CopyFile.RECENT_KEYS">
       <recent name="C:\Dev\fx_case_full" />
@@ -98,7 +117,29 @@
       <recent name="C:\Dev\fx_case_full\config" />
     </key>
   </component>
-  <component name="RunManager" selected="Python.vgvv_backtest">
+  <component name="RunManager" selected="Python.main (1)">
+    <configuration name="main (1)" type="PythonConfigurationType" factoryName="Python" temporary="true" nameIsGenerated="true">
+      <module name="fx_case_full" />
+      <option name="ENV_FILES" value="" />
+      <option name="INTERPRETER_OPTIONS" value="" />
+      <option name="PARENT_ENVS" value="true" />
+      <envs>
+        <env name="PYTHONUNBUFFERED" value="1" />
+      </envs>
+      <option name="SDK_HOME" value="" />
+      <option name="WORKING_DIRECTORY" value="$PROJECT_DIR$" />
+      <option name="IS_MODULE_SDK" value="true" />
+      <option name="ADD_CONTENT_ROOTS" value="true" />
+      <option name="ADD_SOURCE_ROOTS" value="true" />
+      <option name="SCRIPT_NAME" value="$PROJECT_DIR$/main.py" />
+      <option name="PARAMETERS" value="" />
+      <option name="SHOW_COMMAND_LINE" value="false" />
+      <option name="EMULATE_TERMINAL" value="false" />
+      <option name="MODULE_MODE" value="false" />
+      <option name="REDIRECT_INPUT" value="false" />
+      <option name="INPUT_FILE" value="" />
+      <method v="2" />
+    </configuration>
     <configuration name="main" type="PythonConfigurationType" factoryName="Python" temporary="true" nameIsGenerated="true">
       <module name="fx_case_full" />
       <option name="ENV_FILES" value="" />
@@ -113,28 +154,6 @@
       <option name="ADD_CONTENT_ROOTS" value="true" />
       <option name="ADD_SOURCE_ROOTS" value="true" />
       <option name="SCRIPT_NAME" value="C:\Dev\fx_case_full\main.py" />
-      <option name="PARAMETERS" value="" />
-      <option name="SHOW_COMMAND_LINE" value="false" />
-      <option name="EMULATE_TERMINAL" value="false" />
-      <option name="MODULE_MODE" value="false" />
-      <option name="REDIRECT_INPUT" value="false" />
-      <option name="INPUT_FILE" value="" />
-      <method v="2" />
-    </configuration>
-    <configuration name="quick_smoke" type="PythonConfigurationType" factoryName="Python" temporary="true" nameIsGenerated="true">
-      <module name="fx_case_full" />
-      <option name="ENV_FILES" value="" />
-      <option name="INTERPRETER_OPTIONS" value="" />
-      <option name="PARENT_ENVS" value="true" />
-      <envs>
-        <env name="PYTHONUNBUFFERED" value="1" />
-      </envs>
-      <option name="SDK_HOME" value="" />
-      <option name="WORKING_DIRECTORY" value="$PROJECT_DIR$" />
-      <option name="IS_MODULE_SDK" value="true" />
-      <option name="ADD_CONTENT_ROOTS" value="true" />
-      <option name="ADD_SOURCE_ROOTS" value="true" />
-      <option name="SCRIPT_NAME" value="$PROJECT_DIR$/quick_smoke.py" />
       <option name="PARAMETERS" value="" />
       <option name="SHOW_COMMAND_LINE" value="false" />
       <option name="EMULATE_TERMINAL" value="false" />
@@ -165,7 +184,7 @@
       <option name="INPUT_FILE" value="" />
       <method v="2" />
     </configuration>
-    <configuration name="temp" type="PythonConfigurationType" factoryName="Python" temporary="true" nameIsGenerated="true">
+    <configuration name="tearsheet" type="PythonConfigurationType" factoryName="Python" temporary="true" nameIsGenerated="true">
       <module name="fx_case_full" />
       <option name="ENV_FILES" value="" />
       <option name="INTERPRETER_OPTIONS" value="" />
@@ -178,7 +197,7 @@
       <option name="IS_MODULE_SDK" value="true" />
       <option name="ADD_CONTENT_ROOTS" value="true" />
       <option name="ADD_SOURCE_ROOTS" value="true" />
-      <option name="SCRIPT_NAME" value="$PROJECT_DIR$/temp.py" />
+      <option name="SCRIPT_NAME" value="$PROJECT_DIR$/tearsheet.py" />
       <option name="PARAMETERS" value="" />
       <option name="SHOW_COMMAND_LINE" value="false" />
       <option name="EMULATE_TERMINAL" value="false" />
@@ -211,11 +230,11 @@
     </configuration>
     <recent_temporary>
       <list>
-        <item itemvalue="Python.vgvv_backtest" />
+        <item itemvalue="Python.main (1)" />
+        <item itemvalue="Python.tearsheet" />
         <item itemvalue="Python.sabr_backtest" />
+        <item itemvalue="Python.vgvv_backtest" />
         <item itemvalue="Python.main" />
-        <item itemvalue="Python.quick_smoke" />
-        <item itemvalue="Python.temp" />
       </list>
     </recent_temporary>
   </component>
@@ -460,7 +479,23 @@
       <option name="project" value="LOCAL" />
       <updated>1755868464585</updated>
     </task>
-    <option name="localTasksCounter" value="30" />
+    <task id="LOCAL-00030" summary="-">
+      <option name="closed" value="true" />
+      <created>1755868766507</created>
+      <option name="number" value="00030" />
+      <option name="presentableId" value="LOCAL-00030" />
+      <option name="project" value="LOCAL" />
+      <updated>1755868766507</updated>
+    </task>
+    <task id="LOCAL-00031" summary="-">
+      <option name="closed" value="true" />
+      <created>1755868947610</created>
+      <option name="number" value="00031" />
+      <option name="presentableId" value="LOCAL-00031" />
+      <option name="project" value="LOCAL" />
+      <updated>1755868947610</updated>
+    </task>
+    <option name="localTasksCounter" value="32" />
     <servers />
   </component>
   <component name="VcsManagerConfiguration">

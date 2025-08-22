@@ -100,14 +100,18 @@ def aggregate_period_returns(returns: pd.Series, freq: str) -> pd.Series:
 # Plotting helpers
 # -----------------------------
 
-def _plot_equity(ax, cum_rets: pd.Series, label: str = 'Strategy'):
-    ax.plot(cum_rets.index, cum_rets.values, lw=2, color='green', alpha=0.7, label=label)
-    ax.axhline(1.0, ls='--', color='black', lw=1)
+def _plot_equity(ax, equity_curve: pd.Series, label: str = 'Strategy'):
+    # Plot actual equity (in $), with a baseline at the initial value
+    baseline = float(equity_curve.iloc[0]) if len(equity_curve) else 0.0
+    ax.plot(equity_curve.index, equity_curve.values, lw=2, color='blue', alpha=0.7, label=label)
+    if baseline > 0:
+        ax.axhline(baseline, ls='--', color='black', lw=1)
+    ax.yaxis.set_major_formatter(FuncFormatter(lambda y, _: f'$ {y/1e6:.1f}M'))
     ax.yaxis.grid(linestyle=':')
     ax.xaxis.grid(linestyle=':')
-    ax.set_ylabel('Cumulative Returns')
+    ax.set_ylabel('Equity ($)')
     ax.legend(loc='best')
-    ax.xaxis.set_major_locator(mdates.YearLocator( max(1, int(len(cum_rets)/252/10)) ))
+    ax.xaxis.set_major_locator(mdates.YearLocator( max(1, int(len(equity_curve)/252/10)) ))
     ax.xaxis.set_major_formatter(mdates.DateFormatter('%Y'))
 
 
@@ -183,6 +187,9 @@ def save_tearsheet(equity_series: pd.Series, title: str, out_file: str, periods:
     equity_series = equity_series.sort_index()
     returns = _daily_returns(equity_series)
     cum_rets = _cum_returns(returns)
+    # Build an equity curve that starts at the initial equity (e.g., 10M)
+    initial_value = float(equity_series.iloc[0])
+    equity_curve = cum_rets * initial_value
     drawdown, max_dd, max_dur = create_drawdowns(cum_rets)
 
     Path(out_file).parent.mkdir(parents=True, exist_ok=True)
@@ -197,7 +204,7 @@ def save_tearsheet(equity_series: pd.Series, title: str, out_file: str, periods:
     ax_month = plt.subplot(gs[2, :2])
     ax_year = plt.subplot(gs[2, 2])
 
-    _plot_equity(ax_eq, cum_rets)
+    _plot_equity(ax_eq, equity_curve)
     _plot_drawdown(ax_dd, drawdown)
     _plot_monthly(ax_month, returns)
     _plot_yearly(ax_year, returns)
@@ -221,4 +228,3 @@ if __name__ == '__main__':
     equity = pd.Series(1_000_000 * (1+0.0003)**np.arange(len(idx)), index=idx)
     save_tearsheet(equity, 'Synthetic Strategy', 'results/tearsheets/sample.png')
     print('Sample tearsheet saved.')
-

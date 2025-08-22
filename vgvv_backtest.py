@@ -73,9 +73,9 @@ class VGVVTrade:
 
 class VGVVSmileBacktester:
     def __init__(self, loader, pairs: List[str], start_date, end_date,
-                 initial_capital=10_000_000, vol_edge_threshold=0.005,
-                 bid_ask=0.0050, commission=0.0005, slippage=0.0002,
-                 margin_rate=0.20, daily_capital_fraction=0.02,
+                 initial_capital=10_000_000, vol_edge_threshold=0.0100,
+                 bid_ask=0.0125, commission=0.0005, slippage=0.0002,
+                 margin_rate=0.20, daily_capital_fraction=0.025,
                  max_notional=2_500_000, allocation_mode='return', seed=42,
                  use_moneyness_cost: bool = False,
                  bid_ask_wing_mult: float = 1.5,
@@ -282,7 +282,7 @@ class VGVVSmileBacktester:
         d = self._delta(spot, tr.strike, T, tr.entry_vol, tr.domestic_rate, tr.foreign_rate, tr.option_type)
         if abs(d)>0.04 and not tr.hedged:
             hedge_units = -d * tr.notional * tr.direction
-            cost = abs(hedge_units) * spot * 0.0001
+            cost = abs(hedge_units) * spot * 0.0002
             self.equity -= cost
             tr.hedged = True
             tr.hedge_size = hedge_units
@@ -392,7 +392,7 @@ class VGVVSmileBacktester:
                         desired_units = -d_now * tr.notional * tr.direction
                         dH = desired_units - tr.hedge_size
                         if abs(dH) > 1e-12:
-                            cost = abs(dH) * spot * 0.0001
+                            cost = abs(dH) * spot * 0.0002
                             self.equity -= cost
                             day_pnl_by_tenor[tr.tenor] -= cost
                             tr.hedged = True
@@ -648,5 +648,5 @@ if __name__ == '__main__':
     loader = FXDataLoader()
     pairs = ['ALL']
     # Start 3 months earlier; report from 2007-01-01
-    bt_r = VGVVSmileBacktester(loader, pairs, '2006-09-01','2024-12-31', allocation_mode='return', report_start_date='2007-01-01'); bt_r.run()
-    bt_s = VGVVSmileBacktester(loader, pairs, '2006-09-01','2024-12-31', allocation_mode='sortino', report_start_date='2007-01-01'); bt_s.run()
+    bt_r = VGVVSmileBacktester(loader, pairs, '2019-09-01','2024-12-31', allocation_mode='return', report_start_date='2020-01-01'); bt_r.run()
+    bt_s = VGVVSmileBacktester(loader, pairs, '2019-09-01','2024-12-31', allocation_mode='sortino', report_start_date='2020-01-01'); bt_s.run()

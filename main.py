@@ -10,7 +10,7 @@ def main():
     loader = FXDataLoader()
     # pairs = ['EURUSD', 'USDJPY', 'XAUUSD', 'GBPUSD', 'USDCAD', 'USDCHF', 'NZDUSD']
     pairs = ['ALL']
-    start = '2006-09-01'
+    start = '2019-09-01'
     end = '2024-12-31'
 
     print('=== Running SABR backtest ===')
@@ -19,7 +19,7 @@ def main():
     print('SABR summary:', {k: res_sabr[k] for k in ['total_return','annualized_return','sharpe_ratio','max_drawdown']})
 
     print('\n=== Running VGVV backtest ===')
-    vgvv = VGVVSmileBacktester(loader, pairs, start, end, allocation_mode='sortino', report_start_date='2007-01-01')
+    vgvv = VGVVSmileBacktester(loader, pairs, start, end, allocation_mode='return', report_start_date='2007-01-01')
     res_vgvv = vgvv.run()
     print('VGVV summary:', {k: res_vgvv[k] for k in ['total_return','annualized_return','sharpe_ratio','max_drawdown']})
 
