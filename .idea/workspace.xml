@@ -5,15 +5,9 @@
   </component>
   <component name="ChangeListManager">
     <list default="true" id="637e7064-2d68-4de1-8449-ece28e37a35d" name="Changes" comment="-">
-      <change afterPath="$PROJECT_DIR$/rates.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/sabr_backtest.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/smile_replication.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/tearsheet.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/vgvv_backtest.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/backtesting_engine.py" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/main.py" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/risk_management.py" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/sabr_backtest.py" beforeDir="false" afterPath="$PROJECT_DIR$/sabr_backtest.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/vgvv_backtest.py" beforeDir="false" afterPath="$PROJECT_DIR$/vgvv_backtest.py" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -337,7 +331,15 @@
       <option name="project" value="LOCAL" />
       <updated>1755757222286</updated>
     </task>
-    <option name="localTasksCounter" value="17" />
+    <task id="LOCAL-00017" summary="-">
+      <option name="closed" value="true" />
+      <created>1755768597515</created>
+      <option name="number" value="00017" />
+      <option name="presentableId" value="LOCAL-00017" />
+      <option name="project" value="LOCAL" />
+      <updated>1755768597515</updated>
+    </task>
+    <option name="localTasksCounter" value="18" />
     <servers />
   </component>
   <component name="VcsManagerConfiguration">

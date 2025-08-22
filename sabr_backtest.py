@@ -31,11 +31,13 @@ from __future__ import annotations
 import pandas as pd
 import numpy as np
 from dataclasses import dataclass
-from typing import List, Dict
+from typing import List
 from pathlib import Path
 from collections import defaultdict
 import warnings
 import matplotlib.pyplot as plt
+import os
+os.environ.setdefault('CVXPY_SUPPRESS_WARNINGS','1')
 
 from pricing_models import BlackScholesFX
 from smile_replication import build_and_calibrate_smile, extract_overpriced_options, TENOR_DAYS
@@ -79,6 +81,9 @@ class OptionTrade:
     exit_price: float = 0.0
     pnl: float = 0.0
     premium_net_received: float = 0.0
+    last_mark: float = 0.0   # direction * notional * last option price
+    hedge_last_mark: float = 0.0  # hedge_size * last spot
+    hedge_entry_spot: float = 0.0  # spot when hedge was placed
 
 class SABRSmileBacktester:
     def __init__(self, loader, pairs: List[str], start_date, end_date,
@@ -183,13 +188,15 @@ class SABRSmileBacktester:
             w_raw = scores / scores.sum()
             weights = {t: float(w_raw.get(t,0)) for t in TENORS}
         for k,v in list(weights.items()):
-            if v>0:
+            # Enforce 5% floor on ALL tenors (even those without data yet) per requirement
+            if v > 0:
                 weights[k] = max(v, floor)
+        # Add missing tenors at floor
+        for t in TENORS:
+            if t not in weights or weights[t] == 0:
+                weights[t] = floor
         total = sum(weights.values())
-        if total==0:
-            weights = {t:1/len(TENORS) for t in TENORS}
-        else:
-            weights = {t:v/total for t,v in weights.items()}
+        weights = {t: v/total for t,v in weights.items()}
         self.tenor_weights = weights
         self.tenor_alloc_history.append({'date':date,'mode':self.allocation_mode, **self.tenor_weights})
         print(f"[REBALANCE-SABR-{self.allocation_mode.upper()}] {date.date()} weights: "+", ".join(f"{k}:{v:.1%}" for k,v in self.tenor_weights.items()))
@@ -246,7 +253,9 @@ class SABRSmileBacktester:
             foreign_rate=cand['r_f'],
             spot_entry=cand['spot'],
             forward=cand['forward'],
-            premium_net_received=premium_net
+            premium_net_received=premium_net,
+            last_mark=(-1) * notional * price,  # direction is -1
+            hedge_last_mark=0.0
         )
         self.open_trades.append(trade)
         self.trade_counter += 1
@@ -262,20 +271,19 @@ class SABRSmileBacktester:
             trade.hedged = True
             trade.hedge_size = hedge_units
             trade.hedge_cost = cost
+            trade.hedge_last_mark = trade.hedge_size * spot
+            trade.hedge_entry_spot = spot
 
     def _value_trade(self, trade: OptionTrade, date: pd.Timestamp, spot: float):
         if date >= trade.expiry_date:
             intrinsic = max(spot - trade.strike,0) if trade.option_type=='call' else max(trade.strike - spot,0)
-            value = intrinsic * trade.notional
-            pnl = trade.premium_net_received - value
+            # Realized PnL for reporting only (equity already fully MTM):
+            pnl_realized = trade.premium_net_received - intrinsic * trade.notional
             if trade.hedged:
-                pnl += trade.hedge_size * (spot - trade.spot_entry) - trade.hedge_cost
-            self.margin_used -= trade.spot_entry * trade.notional * self.margin_rate
+                pnl_realized += trade.hedge_size * (spot - trade.hedge_entry_spot) - trade.hedge_cost
             trade.exit_price = intrinsic
-            trade.pnl = pnl
-            self.equity += pnl
-            self.closed_trades.append(trade)
-            return pnl
+            trade.pnl = pnl_realized
+            return pnl_realized
         return 0.0
 
     def _portfolio_greeks(self, date: pd.Timestamp):
@@ -302,21 +310,45 @@ class SABRSmileBacktester:
         ensure_rates()
         print(f"\n=== SABR Backtest ({self.allocation_mode}) ===")
         print(f"Period: {self.start_date.date()} -> {self.end_date.date()}  Pairs: {', '.join(self.pairs)}")
+        realized_equity_base = self.initial_capital  # dynamic equity base including realized premium & MTM deltas
         for date in self.business_days:
             self._rebalance(date)
+            day_mtm_pnl = 0.0
             spot_cache = {}
+            # Mark-to-market existing positions
             for tr in list(self.open_trades):
-                if tr.pair not in spot_cache:
-                    vd = self.loader.get_volatility_surface(tr.pair, date)
-                    if not vd: continue
-                    spot_cache[tr.pair] = vd.spot
-                pnl = self._value_trade(tr, date, spot_cache[tr.pair])
-                if pnl != 0:
-                    self.open_trades.remove(tr)
-                    self.tenor_daily_pnl[tr.tenor].append(pnl)
+                vd = self.loader.get_volatility_surface(tr.pair, date)
+                if not vd:
+                    continue
+                spot = vd.spot
+                spot_cache[tr.pair] = spot
+                expired = date >= tr.expiry_date
+                if not expired:
+                    T = max((tr.expiry_date - date).days,1)/365
+                    try:
+                        price_now = self.bs.price(tr.strike, int(T*365), tr.entry_vol, spot, tr.domestic_rate, tr.foreign_rate, tr.option_type)
+                    except Exception:
+                        price_now = max((spot-tr.strike) if tr.option_type=='call' else (tr.strike-spot),0)
                 else:
-                    self.tenor_daily_pnl[tr.tenor].append(0.0)
-            # New trades
+                    price_now = max((spot-tr.strike) if tr.option_type=='call' else (tr.strike-spot),0)
+                current_mark = tr.direction * tr.notional * price_now  # negative for short
+                delta_pnl = tr.last_mark - current_mark
+                day_mtm_pnl += delta_pnl
+                tr.last_mark = current_mark
+                # Hedge MTM
+                if tr.hedged:
+                    hedge_mark = tr.hedge_size * spot
+                    hedge_delta_pnl = hedge_mark - tr.hedge_last_mark
+                    day_mtm_pnl += hedge_delta_pnl
+                    tr.hedge_last_mark = hedge_mark
+                if expired:
+                    # Compute realized PnL for report
+                    self._value_trade(tr, date, spot)
+                    self.open_trades.remove(tr)
+                    self.closed_trades.append(tr)
+            # Apply daily MTM to equity
+            self.equity += day_mtm_pnl
+            # Open new trades (after MTM)
             if len(self.open_trades) < 300:
                 for tenor in TENORS:
                     tenor_cap = self.initial_capital * self.tenor_weights[tenor]
@@ -344,6 +376,7 @@ class SABRSmileBacktester:
                     for cd in cands[:3]:
                         tr = self._open_trade(cd, date, tenor_cap)
                         if tr:
+                            self.equity += tr.premium_net_received  # receive premium
                             self._hedge(tr, cd['spot'])
             else:
                 for tenor in TENORS:
@@ -352,7 +385,7 @@ class SABRSmileBacktester:
             theta_est = g.get('theta',0.0)
             self.daily_theta_est.append({'date':date,'theta_pnl_est':theta_est})
             self.daily_greeks.append({'date':date, **g})
-            self.daily_records.append({'date':date,'equity':self.equity,'open_trades':len(self.open_trades),'closed_trades':len(self.closed_trades),'margin_used':self.margin_used, **g})
+            self.daily_records.append({'date':date,'equity':self.equity,'open_trades':len(self.open_trades),'closed_trades':len(self.closed_trades),'margin_used':self.margin_used, 'day_mtm_pnl':day_mtm_pnl, **g})
             if (len(self.daily_records)%250==0) or date==self.business_days[-1]:
                 ret=(self.equity-self.initial_capital)/self.initial_capital
                 print(f"  {date.date()} | Eq ${self.equity/1e6:.2f}M Ret {ret:+.1%} Open {len(self.open_trades)} Closed {len(self.closed_trades)}")
@@ -416,7 +449,8 @@ class SABRSmileBacktester:
         print(f"\n=== SABR Summary ({self.allocation_mode}) ===")
         print(f"Total Return: {tot_ret:+.1%} AnnReturn: {ann_ret:+.1%} Sharpe: {sharpe:.2f} MaxDD: {max_dd:.1%} Closed: {len(self.closed_trades)} FinalEq: ${self.equity:,.0f}")
         if not tenor_perf_df.empty:
-            print('Tenor Performance: '+', '.join(f"{r.tenor}:{r.cum_pnl:,.0f}" for r in tenor_perf_df.itertuples()))
+            rows = tenor_perf_df.to_dict('records')
+            print('Tenor Performance: '+', '.join(f"{r['tenor']}:{r['cum_pnl']:,.0f}" for r in rows))
         return {
             'initial_capital': self.initial_capital,
             'final_equity': float(self.equity),

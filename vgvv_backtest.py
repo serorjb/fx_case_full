@@ -19,9 +19,11 @@ from typing import List
 from collections import defaultdict
 import warnings
 warnings.filterwarnings('ignore')
+import os
+os.environ.setdefault('CVXPY_SUPPRESS_WARNINGS','1')
 
 from pricing_models import BlackScholesFX
-from smile_replication import build_and_calibrate_smile, TENOR_DAYS, TARGET_DELTAS
+from smile_replication import build_and_calibrate_smile, TENOR_DAYS
 from rates import get_domestic_foreign_rates, ensure_rates
 from trading_strategy import EnhancedVolatilityArbitrageStrategy, ENHANCED_CONFIG
 from tearsheet import save_tearsheet  # NEW
@@ -63,6 +65,9 @@ class VGVVTrade:
     exit_price: float=0.0
     pnl: float=0.0
     premium_net_received: float=0.0
+    last_mark: float = 0.0
+    hedge_last_mark: float = 0.0
+    hedge_entry_spot: float = 0.0
 
 class VGVVSmileBacktester:
     def __init__(self, loader, pairs: List[str], start_date, end_date,
@@ -177,11 +182,12 @@ class VGVVSmileBacktester:
         # floor & renorm
         for k,v in list(weights.items()):
             if v>0: weights[k] = max(v, floor)
+        # Add missing / zero weights at floor
+        for t in TENORS:
+            if t not in weights or weights[t] == 0:
+                weights[t] = floor
         total = sum(weights.values())
-        if total == 0:
-            weights = {t:1/len(TENORS) for t in TENORS}
-        else:
-            weights = {t:v/total for t,v in weights.items()}
+        weights = {t: v/total for t,v in weights.items()}
         self.tenor_weights = weights
         self.tenor_alloc_history.append({'date': current_date, 'mode': self.allocation_mode, **self.tenor_weights})
         print(f"[REBALANCE-VGVV-{self.allocation_mode.upper()}] {current_date.date()} weights: "+", ".join(f"{k}:{v:.1%}" for k,v in self.tenor_weights.items()))
@@ -223,7 +229,9 @@ class VGVVSmileBacktester:
             foreign_rate=cand['r_f'],
             spot_entry=cand['spot'],
             forward=cand['forward'],
-            premium_net_received=premium_net
+            premium_net_received=premium_net,
+            last_mark=(-1) * notional * price,
+            hedge_last_mark=0.0
         )
         self.open_trades.append(tr)
         self.trade_counter += 1
@@ -239,20 +247,19 @@ class VGVVSmileBacktester:
             tr.hedged = True
             tr.hedge_size = hedge_units
             tr.hedge_cost = cost
+            tr.hedge_last_mark = tr.hedge_size * spot
+            tr.hedge_entry_spot = spot
 
     def _value_trade(self, tr: VGVVTrade, date, spot):
         if date >= tr.expiry_date:
             intrinsic = max(spot - tr.strike,0) if tr.option_type=='call' else max(tr.strike - spot,0)
-            value = intrinsic * tr.notional
-            pnl = tr.premium_net_received - value
+            # Realized PnL for reporting only (equity handled via MTM)
+            pnl_realized = tr.premium_net_received - intrinsic * tr.notional
             if tr.hedged:
-                pnl += tr.hedge_size * (spot - tr.spot_entry) - tr.hedge_cost
-            self.margin_used -= tr.spot_entry * tr.notional * self.margin_rate
+                pnl_realized += tr.hedge_size * (spot - tr.hedge_entry_spot) - tr.hedge_cost
             tr.exit_price = intrinsic
-            tr.pnl = pnl
-            self.equity += pnl
-            self.closed_trades.append(tr)
-            return pnl
+            tr.pnl = pnl_realized
+            return pnl_realized
         return 0.0
 
     def _greeks(self, date):
@@ -277,22 +284,39 @@ class VGVVSmileBacktester:
         print(f"\n=== VGVV Backtest ({self.allocation_mode}) ===")
         print(f"Period: {self.start_date.date()} -> {self.end_date.date()}  Pairs: {', '.join(self.pairs)}")
         for date in self.business_days:
-            # Rebalance
             self._optimize_weights(date)
-            # Expiries
-            spot_cache = {}
+            day_mtm_pnl = 0.0
+            # MTM existing trades
             for tr in list(self.open_trades):
-                if tr.pair not in spot_cache:
-                    vd = self.loader.get_volatility_surface(tr.pair, date)
-                    if not vd: continue
-                    spot_cache[tr.pair] = vd.spot
-                pnl = self._value_trade(tr, date, spot_cache[tr.pair])
-                if pnl!=0:
-                    self.open_trades.remove(tr)
-                    self.tenor_daily_pnl[tr.tenor].append(pnl)
+                vd = self.loader.get_volatility_surface(tr.pair, date)
+                if not vd: continue
+                spot = vd.spot
+                expired = date >= tr.expiry_date
+                if not expired:
+                    T = max((tr.expiry_date - date).days,1)/365
+                    try:
+                        price_now = self.bs.price(tr.strike, int(T*365), tr.entry_vol, spot, tr.domestic_rate, tr.foreign_rate, tr.option_type)
+                    except Exception:
+                        price_now = max((spot-tr.strike) if tr.option_type=='call' else (tr.strike-spot),0)
                 else:
-                    self.tenor_daily_pnl[tr.tenor].append(0.0)
-            # New trades
+                    price_now = max((spot-tr.strike) if tr.option_type=='call' else (tr.strike-spot),0)
+                current_mark = tr.direction * tr.notional * price_now
+                delta_pnl = tr.last_mark - current_mark
+                day_mtm_pnl += delta_pnl
+                tr.last_mark = current_mark
+                if tr.hedged:
+                    hedge_mark = tr.hedge_size * spot
+                    hedge_delta = hedge_mark - tr.hedge_last_mark
+                    day_mtm_pnl += hedge_delta
+                    tr.hedge_last_mark = hedge_mark
+                if expired:
+                    # Compute realized for report
+                    self._value_trade(tr, date, spot)
+                    self.open_trades.remove(tr)
+                    self.closed_trades.append(tr)
+            self.equity += day_mtm_pnl
+            spot_cache = {}
+            # Open new trades
             if len(self.open_trades) < 300:
                 for tenor in TENORS:
                     tenor_cap = self.initial_capital * self.tenor_weights[tenor]
@@ -309,19 +333,15 @@ class VGVVSmileBacktester:
                         fwd = vd.forwards.get(tenor, vd.spot)
                         smile = build_and_calibrate_smile(pair, date, tenor, vd.spot, fwd, atm, rr25, bf25, rr10, bf10)
                         if not smile: continue
-                        # For each point compute model vol via VGVV model
                         for p in smile.points:
-                            # model vol using VGVV engine (use rr/bf inputs as context)
                             model_vol = self.strategy.ultra_enhanced_vgvv_model(
-                                p.market_vol, rr25, bf25, rr10, bf10,
-                                vd.spot, fwd, TENOR_DAYS[tenor]/365
+                                p.market_vol, rr25, bf25, rr10, bf10, vd.spot, fwd, TENOR_DAYS[tenor]/365
                             )
                             edge = p.market_vol - model_vol
                             if edge > self.vol_edge_threshold:
                                 opt_type = 'call' if p.delta >= 0.5 else 'put'
                                 T = TENOR_DAYS[tenor]/365
                                 r_d, r_f = get_domestic_foreign_rates(date, T, vd.spot, fwd)
-                                # attach fields to a lightweight object
                                 class _Point: pass
                                 pt = _Point(); pt.delta=p.delta; pt.strike=p.strike; pt.market_vol=p.market_vol; pt.model_vol=model_vol; pt.vol_edge=edge
                                 cands.append({'pair':pair,'tenor':tenor,'point':pt,'spot':vd.spot,'forward':fwd,'type':opt_type,'r_d':r_d,'r_f':r_f})
@@ -330,16 +350,16 @@ class VGVVSmileBacktester:
                     for cd in cands[:3]:
                         tr = self._open_trade(cd, date, tenor_cap)
                         if tr:
+                            self.equity += tr.premium_net_received
                             self._hedge(tr, cd['spot'])
             else:
                 for tenor in TENORS:
                     self.tenor_capital_history[tenor].append(self.initial_capital * self.tenor_weights[tenor])
             g = self._greeks(date)
-            # theta estimate daily PnL (theta already daily from greeks calc presentation)
             theta_pnl_est = g.get('theta',0.0)
             self.daily_theta_est.append({'date':date,'theta_pnl_est':theta_pnl_est})
             self.daily_greeks.append({'date':date, **g})
-            self.daily_records.append({'date':date,'equity':self.equity,'open_trades':len(self.open_trades),'closed_trades':len(self.closed_trades),'margin_used':self.margin_used, 'theta_pnl_est':theta_pnl_est, **g})
+            self.daily_records.append({'date':date,'equity':self.equity,'open_trades':len(self.open_trades),'closed_trades':len(self.closed_trades),'margin_used':self.margin_used,'day_mtm_pnl':day_mtm_pnl,'theta_pnl_est':theta_pnl_est, **g})
             if (len(self.daily_records)%250==0) or date==self.business_days[-1]:
                 ret=(self.equity-self.initial_capital)/self.initial_capital
                 print(f"  {date.date()} | Eq ${self.equity/1e6:.2f}M Ret {ret:+.1%} Open {len(self.open_trades)} Closed {len(self.closed_trades)}")
@@ -399,7 +419,8 @@ class VGVVSmileBacktester:
         print(f"\n=== VGVV Summary ({self.allocation_mode}) ===")
         print(f"Total Return: {tot_ret:+.1%} AnnReturn: {ann_ret:+.1%} Sharpe: {sharpe:.2f} MaxDD: {max_dd:.1%} Closed: {len(self.closed_trades)} FinalEq: ${self.equity:,.0f}")
         if not tenor_perf_df.empty:
-            print('Tenor Performance: '+', '.join(f"{r.tenor}:{r.cum_pnl:,.0f}" for r in tenor_perf_df.itertuples()))
+            rows = tenor_perf_df.to_dict('records')
+            print('Tenor Performance: '+', '.join(f"{r['tenor']}:{r['cum_pnl']:,.0f}" for r in rows))
         return {
             'initial_capital': self.initial_capital,
             'final_equity': float(self.equity),
