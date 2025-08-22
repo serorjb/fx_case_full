@@ -74,8 +74,8 @@ class VGVVTrade:
 class VGVVSmileBacktester:
     def __init__(self, loader, pairs: List[str], start_date, end_date,
                  initial_capital=10_000_000, vol_edge_threshold=0.005,
-                 bid_ask=0.0010, commission=0.0005, slippage=0.0002,
-                 margin_rate=0.20, daily_capital_fraction=0.10,
+                 bid_ask=0.0025, commission=0.0005, slippage=0.0002,
+                 margin_rate=0.20, daily_capital_fraction=0.03,
                  max_notional=2_500_000, allocation_mode='return', seed=42,
                  use_moneyness_cost: bool = False,
                  bid_ask_wing_mult: float = 1.5,
@@ -369,7 +369,6 @@ class VGVVSmileBacktester:
                 else:
                     delta_pnl = current_mark - tr.last_mark
                     tr.last_mark = current_mark
-
                 day_mtm_pnl += delta_pnl
                 day_pnl_by_tenor[tr.tenor] += delta_pnl
                 # Hedge MTM
@@ -379,7 +378,6 @@ class VGVVSmileBacktester:
                     day_mtm_pnl += hedge_delta
                     day_pnl_by_tenor[tr.tenor] += hedge_delta
                     tr.hedge_last_mark = hedge_mark
-                    # Hedge carry cost/income
                     carry = tr.hedge_size * spot * (tr.domestic_rate - tr.foreign_rate) / 252.0
                     self.equity += carry
                     day_pnl_by_tenor[tr.tenor] += carry
@@ -439,7 +437,6 @@ class VGVVSmileBacktester:
                                 if vg and params_vg:
                                     model_vol = vg.vgvv_vol(p.strike, params_vg)
                                 else:
-                                    # Fallback to conservative heuristic if calibration failed
                                     model_vol = max(p.market_vol * 0.9, 0.0001)
                                 edge = p.market_vol - model_vol
                             except Exception:

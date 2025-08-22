@@ -92,11 +92,11 @@ class SABRSmileBacktester:
     def __init__(self, loader, pairs: List[str], start_date, end_date,
                  initial_capital: float = 10_000_000.0,
                  min_vol_edge: float = 0.005,
-                 bid_ask: float = 0.0010,
+                 bid_ask: float = 0.0025,
                  commission: float = 0.0005,
                  slippage: float = 0.0002,
                  margin_rate: float = 0.20,
-                 daily_capital_fraction: float = 0.10,
+                 daily_capital_fraction: float = 0.03,
                  max_notional: float = 2_500_000.0,
                  allocation_mode: str = 'return', seed: int = 42,
                  use_moneyness_cost: bool = False,
@@ -165,10 +165,8 @@ class SABRSmileBacktester:
             cap_hist = self.tenor_capital_history.get(t, [])
             if not pnl_list or not cap_hist:
                 continue
-            # Use time-varying capital for returns over the last window
             pnl_series = pd.Series(pnl_list[-window:])
             cap_series = pd.Series(cap_hist[-window:])
-            # Align lengths defensively
             n = min(len(pnl_series), len(cap_series))
             if n == 0:
                 continue
@@ -214,10 +212,8 @@ class SABRSmileBacktester:
             w_raw = scores / scores.sum()
             weights = {t: float(w_raw.get(t,0)) for t in TENORS}
         for k,v in list(weights.items()):
-            # Enforce 5% floor on ALL tenors (even those without data yet) per requirement
             if v > 0:
                 weights[k] = max(v, floor)
-        # Add missing tenors at floor
         for t in TENORS:
             if t not in weights or weights[t] == 0:
                 weights[t] = floor
