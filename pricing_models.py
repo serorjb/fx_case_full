@@ -79,7 +79,7 @@ class BlackScholesFX(QuantLibPricingBase):
         )
 
         # Create Garman-Kohlhagen process for FX
-        self.process = ql.GarmanKohlhagenProcess(
+        self.process = ql.GarmanKohlagenProcess(
             self.spot_handle,
             self.foreign_rate,
             self.domestic_rate,
