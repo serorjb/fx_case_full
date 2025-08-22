@@ -75,7 +75,7 @@ class VGVVSmileBacktester:
     def __init__(self, loader, pairs: List[str], start_date, end_date,
                  initial_capital=10_000_000, vol_edge_threshold=0.005,
                  bid_ask=0.0050, commission=0.0005, slippage=0.0002,
-                 margin_rate=0.20, daily_capital_fraction=0.03,
+                 margin_rate=0.20, daily_capital_fraction=0.02,
                  max_notional=2_500_000, allocation_mode='return', seed=42,
                  use_moneyness_cost: bool = False,
                  bid_ask_wing_mult: float = 1.5,

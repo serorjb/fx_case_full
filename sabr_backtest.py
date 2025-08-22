@@ -96,7 +96,7 @@ class SABRSmileBacktester:
                  commission: float = 0.0005,
                  slippage: float = 0.0002,
                  margin_rate: float = 0.20,
-                 daily_capital_fraction: float = 0.03,
+                 daily_capital_fraction: float = 0.02,
                  max_notional: float = 2_500_000.0,
                  allocation_mode: str = 'return', seed: int = 42,
                  use_moneyness_cost: bool = False,
