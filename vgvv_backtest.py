@@ -9,6 +9,8 @@ obtained from smile replication (ATM, RR, BF inputs). Identifies overpriced opti
 Ensures risk-free rates parquet exists (rates.parquet) before running.
 Supports two allocation modes: 'return' and 'sortino', with optional PyPortfolioOpt optimization.
 Tracks Greeks, tenor weights, and outputs CSV/plots similar to SABR module for side-by-side comparison.
+
+Hedging: If |option delta| > 4%, delta hedges are placed at configurable transaction cost hedge_cost_rate per unit spot notional (default 1bp), with daily carry at (r_d - r_f)/252.
 """
 from __future__ import annotations
 import pandas as pd
@@ -73,13 +75,14 @@ class VGVVTrade:
 
 class VGVVSmileBacktester:
     def __init__(self, loader, pairs: List[str], start_date, end_date,
-                 initial_capital=10_000_000, vol_edge_threshold=0.0100,
-                 bid_ask=0.0125, commission=0.0005, slippage=0.0002,
+                 initial_capital=10_000_000, vol_edge_threshold=0.005,
+                 bid_ask=0.0150, commission=0.0005, slippage=0.0002,
                  margin_rate=0.20, daily_capital_fraction=0.025,
                  max_notional=2_500_000, allocation_mode='return', seed=42,
                  use_moneyness_cost: bool = False,
                  bid_ask_wing_mult: float = 1.5,
-                 report_start_date: str | None = '2007-01-01'):
+                 report_start_date: str | None = '2007-01-01',
+                 hedge_cost_rate: float = 0.0001):
         # Auto-discover pairs if 'ALL' passed
         if pairs is None or (isinstance(pairs, list) and len(pairs)==1 and pairs[0].upper()=='ALL'):
             fx_dir = Path('data/FX')
@@ -130,6 +133,8 @@ class VGVVSmileBacktester:
         # Per-pair distribution tracking
         self.pair_daily_new = []
         self.pair_daily_open = []
+        # Hedge transaction cost rate (per unit hedge notional)
+        self.hedge_cost_rate = hedge_cost_rate
 
     def _price(self, spot, strike, T, vol, r_d, r_f, opt_type):
         try:
@@ -282,7 +287,7 @@ class VGVVSmileBacktester:
         d = self._delta(spot, tr.strike, T, tr.entry_vol, tr.domestic_rate, tr.foreign_rate, tr.option_type)
         if abs(d)>0.04 and not tr.hedged:
             hedge_units = -d * tr.notional * tr.direction
-            cost = abs(hedge_units) * spot * 0.0002
+            cost = abs(hedge_units) * spot * self.hedge_cost_rate
             self.equity -= cost
             tr.hedged = True
             tr.hedge_size = hedge_units
@@ -392,7 +397,7 @@ class VGVVSmileBacktester:
                         desired_units = -d_now * tr.notional * tr.direction
                         dH = desired_units - tr.hedge_size
                         if abs(dH) > 1e-12:
-                            cost = abs(dH) * spot * 0.0002
+                            cost = abs(dH) * spot * self.hedge_cost_rate
                             self.equity -= cost
                             day_pnl_by_tenor[tr.tenor] -= cost
                             tr.hedged = True
@@ -648,5 +653,5 @@ if __name__ == '__main__':
     loader = FXDataLoader()
     pairs = ['ALL']
     # Start 3 months earlier; report from 2007-01-01
-    bt_r = VGVVSmileBacktester(loader, pairs, '2019-09-01','2024-12-31', allocation_mode='return', report_start_date='2020-01-01'); bt_r.run()
-    bt_s = VGVVSmileBacktester(loader, pairs, '2019-09-01','2024-12-31', allocation_mode='sortino', report_start_date='2020-01-01'); bt_s.run()
+    bt_r = VGVVSmileBacktester(loader, pairs, '2006-09-01','2024-12-31', allocation_mode='return', report_start_date='2007-01-01'); bt_r.run()
+    bt_s = VGVVSmileBacktester(loader, pairs, '2006-09-01','2024-12-31', allocation_mode='sortino', report_start_date='2007-01-01'); bt_s.run()

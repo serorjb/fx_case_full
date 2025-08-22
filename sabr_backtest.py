@@ -13,7 +13,7 @@ Assumptions:
  - Pricing model: Garman-Kohlhagen via BlackScholesFX.
  - Entry costs (bid/ask + commission + slippage) = 17bp of premium; no exit cost.
  - Margin: 20% spot * notional for shorts (released at expiry).
- - Hedge: If |option delta| > 4% on entry day we hedge to neutral using spot at 1bp cost of hedge notionally.
+ - Hedge: If |option delta| > 4% on entry day we hedge to neutral using spot at configurable cost hedge_cost_rate (default 1bp) of hedge notionally.
  - Notional sizing: Per tenor capital = initial_capital * weight_t. Each day allocate daily_capital_fraction (10%) of that to new trades, split equally among up to 3 options selected.
  - Premium is credited immediately at entry; positions are fully MTM daily; margin released at expiry.
  - Hedge financing: daily carry on hedge exposure approximated by (r_d - r_f)/252 applied to spot hedge PV.
@@ -91,8 +91,8 @@ class OptionTrade:
 class SABRSmileBacktester:
     def __init__(self, loader, pairs: List[str], start_date, end_date,
                  initial_capital: float = 10_000_000.0,
-                 min_vol_edge: float = 0.0100,
-                 bid_ask: float = 0.0125,
+                 min_vol_edge: float = 0.005,
+                 bid_ask: float = 0.0150,
                  commission: float = 0.0005,
                  slippage: float = 0.0002,
                  margin_rate: float = 0.20,
@@ -101,7 +101,8 @@ class SABRSmileBacktester:
                  allocation_mode: str = 'return', seed: int = 42,
                  use_moneyness_cost: bool = False,
                  bid_ask_wing_mult: float = 1.5,
-                 report_start_date: str | None = '2007-01-01'):
+                 report_start_date: str | None = '2007-01-01',
+                 hedge_cost_rate: float = 0.0001):
         # Auto-discover pairs if 'ALL'
         if pairs is None or (isinstance(pairs, list) and len(pairs)==1 and pairs[0].upper()=='ALL'):
             fx_dir = Path('data/FX')
@@ -149,6 +150,8 @@ class SABRSmileBacktester:
         # Per-pair distribution tracking
         self.pair_daily_new = []   # records of new trades per day per pair
         self.pair_daily_open = []  # records of open trades count per day per pair
+        # Hedge transaction cost rate (per unit hedge notional)
+        self.hedge_cost_rate = hedge_cost_rate
 
     # ---------------- Allocation -----------------
     def _rebalance(self, date: pd.Timestamp):
@@ -305,7 +308,7 @@ class SABRSmileBacktester:
         d = self._delta(spot, trade.strike, T, trade.entry_vol, trade.domestic_rate, trade.foreign_rate, trade.option_type)
         if abs(d) > 0.04 and not trade.hedged:
             hedge_units = -d * trade.notional * trade.direction
-            cost = abs(hedge_units) * spot * 0.0002  # 0.02% cost of hedge notional
+            cost = abs(hedge_units) * spot * self.hedge_cost_rate
             self.equity -= cost
             trade.hedged = True
             trade.hedge_size = hedge_units
@@ -427,7 +430,7 @@ class SABRSmileBacktester:
                         desired_units = -d_now * tr.notional * tr.direction
                         dH = desired_units - tr.hedge_size
                         if abs(dH) > 1e-12:
-                            cost = abs(dH) * spot * 0.0002  # 0.02% cost of hedge notional
+                            cost = abs(dH) * spot * self.hedge_cost_rate
                             self.equity -= cost
                             day_pnl_by_tenor[tr.tenor] -= cost
                             # Update hedge position; adjust last_mark to include new units at current spot
@@ -680,5 +683,5 @@ if __name__ == '__main__':
     loader = FXDataLoader()
     pairs = ['ALL']
     # Start 3 months earlier; report from 2007-01-01
-    bt_r = SABRSmileBacktester(loader, pairs, '2019-09-01','2024-12-31', allocation_mode='return', report_start_date='2020-01-01'); bt_r.run()
-    bt_s = SABRSmileBacktester(loader, pairs, '2019-09-01','2024-12-31', allocation_mode='sortino', report_start_date='2020-01-01'); bt_s.run()
+    bt_r = SABRSmileBacktester(loader, pairs, '2006-09-01','2024-12-31', allocation_mode='return', report_start_date='2007-01-01'); bt_r.run()
+    bt_s = SABRSmileBacktester(loader, pairs, '2006-09-01','2024-12-31', allocation_mode='sortino', report_start_date='2007-01-01'); bt_s.run()
