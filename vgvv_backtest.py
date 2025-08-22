@@ -162,12 +162,22 @@ class VGVVSmileBacktester:
         returns_dict = {}
         for t in TENORS:
             pnl_list = self.tenor_daily_pnl.get(t, [])
-            if not pnl_list: continue
+            cap_hist = self.tenor_capital_history.get(t, [])
+            if not pnl_list or not cap_hist:
+                continue
             pnl_series = pd.Series(pnl_list[-window:])
-            base_cap = self.initial_capital * self.tenor_weights.get(t, 1/len(TENORS))
-            if base_cap <= 0: continue
-            returns_dict[t] = (pnl_series / base_cap).reset_index(drop=True)
-        if not returns_dict: return
+            cap_series = pd.Series(cap_hist[-window:])
+            n = min(len(pnl_series), len(cap_series))
+            if n == 0:
+                continue
+            pnl_series = pnl_series.iloc[-n:].reset_index(drop=True)
+            cap_series = cap_series.iloc[-n:].replace(0, np.nan).reset_index(drop=True)
+            if cap_series.isna().all():
+                continue
+            ret_series = (pnl_series / cap_series).fillna(0.0)
+            returns_dict[t] = ret_series
+        if not returns_dict:
+            return
         ret_df = pd.DataFrame(returns_dict)
         floor = 0.05
         weights = None

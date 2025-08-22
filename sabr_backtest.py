@@ -161,13 +161,22 @@ class SABRSmileBacktester:
         returns_dict = {}
         for t in TENORS:
             pnl_list = self.tenor_daily_pnl.get(t, [])
-            if not pnl_list:
+            cap_hist = self.tenor_capital_history.get(t, [])
+            if not pnl_list or not cap_hist:
                 continue
+            # Use time-varying capital for returns over the last window
             pnl_series = pd.Series(pnl_list[-window:])
-            base_cap = self.initial_capital * self.tenor_weights.get(t, 1/len(TENORS))
-            if base_cap <= 0:
+            cap_series = pd.Series(cap_hist[-window:])
+            # Align lengths defensively
+            n = min(len(pnl_series), len(cap_series))
+            if n == 0:
                 continue
-            returns_dict[t] = (pnl_series / base_cap).reset_index(drop=True)
+            pnl_series = pnl_series.iloc[-n:].reset_index(drop=True)
+            cap_series = cap_series.iloc[-n:].replace(0, np.nan).reset_index(drop=True)
+            if cap_series.isna().all():
+                continue
+            ret_series = (pnl_series / cap_series).fillna(0.0)
+            returns_dict[t] = ret_series
         if not returns_dict:
             return
         ret_df = pd.DataFrame(returns_dict)
@@ -432,7 +441,7 @@ class SABRSmileBacktester:
             # Open new trades (after MTM)
             if len(self.open_trades) < 300:
                 for tenor in TENORS:
-                    tenor_cap = self.initial_capital * self.tenor_weights[tenor]
+                    tenor_cap = self.equity * self.tenor_weights[tenor]
                     self.tenor_capital_history[tenor].append(tenor_cap)
                     cands = []
                     for pair in self.pairs:
@@ -462,7 +471,7 @@ class SABRSmileBacktester:
                             new_trades_counter[tr.pair] += 1
             else:
                 for tenor in TENORS:
-                    self.tenor_capital_history[tenor].append(self.initial_capital * self.tenor_weights[tenor])
+                    self.tenor_capital_history[tenor].append(self.equity * self.tenor_weights[tenor])
             # Financing cost on margin used (allocate by tenor share of margin)
             # Recompute margin used from open trades to be robust (use current spot when available)
             margin_by_tenor = defaultdict(float)
@@ -499,6 +508,7 @@ class SABRSmileBacktester:
             self.daily_theta_est.append({'date':date,'theta_pnl_est':theta_est})
             # Diagnostics: capacity/margin utilization
             cap_util = (self.margin_used / (self.equity*0.8)) if self.equity>0 else 0.0
+            cap_util_initial = (self.margin_used / (self.initial_capital*0.8)) if self.initial_capital>0 else 0.0
             self.daily_greeks.append({'date':date, **g})
             self.daily_records.append({
                 'date':date,
@@ -507,6 +517,7 @@ class SABRSmileBacktester:
                 'closed_trades':len(self.closed_trades),
                 'margin_used':self.margin_used,
                 'capacity_utilization': cap_util,
+                'capacity_utilization_initial': cap_util_initial,
                 'day_mtm_pnl':day_mtm_pnl,
                 'theta_pnl_est':theta_est,
                 **g
@@ -600,8 +611,10 @@ class SABRSmileBacktester:
             # Capacity utilization
             if 'capacity_utilization' in df_daily.columns:
                 plt.figure(figsize=(12,3));
-                plt.plot(df_daily.index, df_daily['capacity_utilization'], color='slateblue');
-                plt.title('SABR Capacity Utilization (Margin / 80% Equity)'); plt.ylabel('Utilization'); plt.tight_layout(); plt.savefig(out_dir/'sabr_capacity_utilization.png', dpi=200); plt.close()
+                plt.plot(df_daily.index, df_daily['capacity_utilization'], color='slateblue', label='vs current equity');
+                if 'capacity_utilization_initial' in df_daily.columns:
+                    plt.plot(df_daily.index, df_daily['capacity_utilization_initial'], color='darkorange', alpha=0.8, label='vs initial equity')
+                plt.title('SABR Capacity Utilization (Margin / 80% Equity)'); plt.ylabel('Utilization'); plt.legend(loc='upper right'); plt.tight_layout(); plt.savefig(out_dir/f"sabr_capacity_utilization{mode_suffix}.png", dpi=200); plt.close()
             # Tenor weights
             if self.tenor_alloc_history:
                 wdf = pd.DataFrame(self.tenor_alloc_history).set_index('date'); wdf.plot(figsize=(12,5)); plt.title('SABR Tenor Weights'); plt.tight_layout(); plt.savefig(out_dir/'sabr_tenor_weights.png', dpi=200); plt.close()
