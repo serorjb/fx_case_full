@@ -69,11 +69,12 @@ class VGVVTrade:
     hedge_last_mark: float = 0.0
     hedge_entry_spot: float = 0.0
     entry_cost: float = 0.0
+    first_mtm_done: bool = False  # Track if first MTM has been done
 
 class VGVVSmileBacktester:
     def __init__(self, loader, pairs: List[str], start_date, end_date,
                  initial_capital=10_000_000, vol_edge_threshold=0.005,
-                 bid_ask=0.0005, commission=0.0005, slippage=0.0002,
+                 bid_ask=0.0010, commission=0.0005, slippage=0.0002,
                  margin_rate=0.20, daily_capital_fraction=0.10,
                  max_notional=2_500_000, allocation_mode='return', seed=42,
                  use_moneyness_cost: bool = False,
@@ -268,7 +269,7 @@ class VGVVSmileBacktester:
             spot_entry=cand['spot'],
             forward=cand['forward'],
             premium_net_received=premium_net,
-            last_mark=0.0,
+            last_mark=(-1) * notional * price,  # fair-value mark at entry (liability for short)
             hedge_last_mark=0.0,
             entry_cost=entry_cost
         )
@@ -361,10 +362,16 @@ class VGVVSmileBacktester:
                 else:
                     price_now = max((spot-tr.strike) if tr.option_type=='call' else (tr.strike-spot),0)
                 current_mark = tr.direction * tr.notional * price_now
-                delta_pnl = current_mark - tr.last_mark
+
+                # MTM: skip on entry day; otherwise compute change from last_mark
+                if tr.entry_date == date:
+                    delta_pnl = 0.0
+                else:
+                    delta_pnl = current_mark - tr.last_mark
+                    tr.last_mark = current_mark
+
                 day_mtm_pnl += delta_pnl
                 day_pnl_by_tenor[tr.tenor] += delta_pnl
-                tr.last_mark = current_mark
                 # Hedge MTM
                 if tr.hedged:
                     hedge_mark = tr.hedge_size * spot
@@ -447,8 +454,9 @@ class VGVVSmileBacktester:
                     for cd in cands[:3]:
                         tr = self._open_trade(cd, date, tenor_cap)
                         if tr:
-                            self.equity += tr.premium_net_received
-                            day_pnl_by_tenor[tr.tenor] += tr.premium_net_received
+                            # Book entry cash and liability so net is -entry_cost
+                            self.equity += tr.premium_net_received + tr.last_mark
+                            day_pnl_by_tenor[tr.tenor] += tr.premium_net_received + tr.last_mark
                             new_trades_counter[tr.pair] += 1
             else:
                 for tenor in TENORS:

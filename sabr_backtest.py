@@ -86,12 +86,13 @@ class OptionTrade:
     hedge_last_mark: float = 0.0  # hedge_size * last spot
     hedge_entry_spot: float = 0.0  # spot when hedge was placed
     entry_cost: float = 0.0  # premium * cost_rate at entry
+    first_mtm_done: bool = False  # Track if first MTM has been done
 
 class SABRSmileBacktester:
     def __init__(self, loader, pairs: List[str], start_date, end_date,
                  initial_capital: float = 10_000_000.0,
                  min_vol_edge: float = 0.005,
-                 bid_ask: float = 0.0005,
+                 bid_ask: float = 0.0010,
                  commission: float = 0.0005,
                  slippage: float = 0.0002,
                  margin_rate: float = 0.20,
@@ -293,7 +294,8 @@ class SABRSmileBacktester:
             spot_entry=cand['spot'],
             forward=cand['forward'],
             premium_net_received=premium_net,
-            last_mark=0.0,  # initialize at 0 to prevent double-counting entry premium
+            # Set last_mark to fair value at entry; we'll book it into equity along with premium
+            last_mark=(-1) * notional * price,
             hedge_last_mark=0.0,
             entry_cost=entry_cost
         )
@@ -397,10 +399,16 @@ class SABRSmileBacktester:
                 else:
                     price_now = max((spot-tr.strike) if tr.option_type=='call' else (tr.strike-spot),0)
                 current_mark = tr.direction * tr.notional * price_now
-                delta_pnl = current_mark - tr.last_mark
+
+                # MTM: skip on entry day; otherwise use change from last_mark baseline
+                if tr.entry_date == date:
+                    delta_pnl = 0.0
+                else:
+                    delta_pnl = current_mark - tr.last_mark
+                    tr.last_mark = current_mark
+
                 day_mtm_pnl += delta_pnl
                 day_pnl_by_tenor[tr.tenor] += delta_pnl
-                tr.last_mark = current_mark
                 # Hedge MTM first
                 if tr.hedged:
                     hedge_mark = tr.hedge_size * spot
@@ -466,8 +474,9 @@ class SABRSmileBacktester:
                     for cd in cands[:3]:
                         tr = self._open_trade(cd, date, tenor_cap)
                         if tr:
-                            self.equity += tr.premium_net_received
-                            day_pnl_by_tenor[tr.tenor] += tr.premium_net_received
+                            # Book entry cash premium and the initial mark (liability) so net change is -entry_cost
+                            self.equity += tr.premium_net_received + tr.last_mark
+                            day_pnl_by_tenor[tr.tenor] += tr.premium_net_received + tr.last_mark
                             new_trades_counter[tr.pair] += 1
             else:
                 for tenor in TENORS:
@@ -532,8 +541,9 @@ class SABRSmileBacktester:
         trades_df = pd.DataFrame(t.__dict__ for t in self.closed_trades)
         # Build adjusted equity (reset to initial_capital at report_start)
         eq = df_daily['equity'].copy()
+        eq_vals = np.array([])
         if not eq.empty:
-            # equity at the last business day < report_start
+            # equity at the last business day < self.report_start
             pre = eq[eq.index < self.report_start]
             base = pre.iloc[-1] if len(pre)>0 else (eq.iloc[0] if len(eq)>0 else self.initial_capital)
             adj = eq.copy()

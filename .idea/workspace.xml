@@ -5,6 +5,8 @@
   </component>
   <component name="ChangeListManager">
     <list default="true" id="637e7064-2d68-4de1-8449-ece28e37a35d" name="Changes" comment="-">
+      <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/sabr_backtest.py" beforeDir="false" afterPath="$PROJECT_DIR$/sabr_backtest.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/vgvv_backtest.py" beforeDir="false" afterPath="$PROJECT_DIR$/vgvv_backtest.py" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
@@ -31,35 +33,35 @@
     <option name="hideEmptyMiddlePackages" value="true" />
     <option name="showLibraryContents" value="true" />
   </component>
-  <component name="PropertiesComponent"><![CDATA[{
-  "keyToString": {
-    "Python.allocator.executor": "Run",
-    "Python.backtest.executor": "Run",
-    "Python.build_rates.executor": "Run",
-    "Python.config.executor": "Run",
-    "Python.config_io.executor": "Run",
-    "Python.costs.executor": "Run",
-    "Python.curve (1).executor": "Run",
-    "Python.discount_curves.executor": "Run",
-    "Python.draft (1).executor": "Run",
-    "Python.draft.executor": "Run",
-    "Python.draft2.executor": "Run",
-    "Python.draft_2.executor": "Debug",
-    "Python.main (1).executor": "Run",
-    "Python.plot_equity.executor": "Run",
-    "Python.quick_smoke.executor": "Run",
-    "Python.run_backtests.executor": "Run",
-    "Python.run_strategy.executor": "Run",
-    "Python.run_ultra_optimized.executor": "Run",
-    "Python.sabr_backtest.executor": "Run",
-    "Python.temp.executor": "Run",
-    "Python.temp_smoke.executor": "Run",
-    "Python.vgvv_backtest.executor": "Run",
-    "RunOnceActivity.ShowReadmeOnStart": "true",
-    "last_opened_file_path": "C:/Dev/fx_case_full",
-    "settings.editor.selected.configurable": "promo.ai.assistant"
+  <component name="PropertiesComponent">{
+  &quot;keyToString&quot;: {
+    &quot;Python.allocator.executor&quot;: &quot;Run&quot;,
+    &quot;Python.backtest.executor&quot;: &quot;Run&quot;,
+    &quot;Python.build_rates.executor&quot;: &quot;Run&quot;,
+    &quot;Python.config.executor&quot;: &quot;Run&quot;,
+    &quot;Python.config_io.executor&quot;: &quot;Run&quot;,
+    &quot;Python.costs.executor&quot;: &quot;Run&quot;,
+    &quot;Python.curve (1).executor&quot;: &quot;Run&quot;,
+    &quot;Python.discount_curves.executor&quot;: &quot;Run&quot;,
+    &quot;Python.draft (1).executor&quot;: &quot;Run&quot;,
+    &quot;Python.draft.executor&quot;: &quot;Run&quot;,
+    &quot;Python.draft2.executor&quot;: &quot;Run&quot;,
+    &quot;Python.draft_2.executor&quot;: &quot;Debug&quot;,
+    &quot;Python.main (1).executor&quot;: &quot;Run&quot;,
+    &quot;Python.plot_equity.executor&quot;: &quot;Run&quot;,
+    &quot;Python.quick_smoke.executor&quot;: &quot;Run&quot;,
+    &quot;Python.run_backtests.executor&quot;: &quot;Run&quot;,
+    &quot;Python.run_strategy.executor&quot;: &quot;Run&quot;,
+    &quot;Python.run_ultra_optimized.executor&quot;: &quot;Run&quot;,
+    &quot;Python.sabr_backtest.executor&quot;: &quot;Run&quot;,
+    &quot;Python.temp.executor&quot;: &quot;Run&quot;,
+    &quot;Python.temp_smoke.executor&quot;: &quot;Run&quot;,
+    &quot;Python.vgvv_backtest.executor&quot;: &quot;Run&quot;,
+    &quot;RunOnceActivity.ShowReadmeOnStart&quot;: &quot;true&quot;,
+    &quot;last_opened_file_path&quot;: &quot;C:/Dev/fx_case_full&quot;,
+    &quot;settings.editor.selected.configurable&quot;: &quot;promo.ai.assistant&quot;
   }
-}]]></component>
+}</component>
   <component name="RecentsManager">
     <key name="CopyFile.RECENT_KEYS">
       <recent name="C:\Dev\fx_case_full" />
@@ -74,7 +76,7 @@
       <recent name="C:\Dev\fx_case_full\config" />
     </key>
   </component>
-  <component name="RunManager" selected="Python.quick_smoke">
+  <component name="RunManager" selected="Python.temp_smoke">
     <configuration name="quick_smoke" type="PythonConfigurationType" factoryName="Python" temporary="true" nameIsGenerated="true">
       <module name="fx_case_full" />
       <option name="ENV_FILES" value="" />
@@ -187,10 +189,10 @@
     </configuration>
     <recent_temporary>
       <list>
+        <item itemvalue="Python.temp_smoke" />
         <item itemvalue="Python.quick_smoke" />
         <item itemvalue="Python.sabr_backtest" />
         <item itemvalue="Python.vgvv_backtest" />
-        <item itemvalue="Python.temp_smoke" />
         <item itemvalue="Python.temp" />
       </list>
     </recent_temporary>
@@ -388,7 +390,23 @@
       <option name="project" value="LOCAL" />
       <updated>1755856407279</updated>
     </task>
-    <option name="localTasksCounter" value="24" />
+    <task id="LOCAL-00024" summary="-">
+      <option name="closed" value="true" />
+      <created>1755856759785</created>
+      <option name="number" value="00024" />
+      <option name="presentableId" value="LOCAL-00024" />
+      <option name="project" value="LOCAL" />
+      <updated>1755856759785</updated>
+    </task>
+    <task id="LOCAL-00025" summary="-">
+      <option name="closed" value="true" />
+      <created>1755856845947</created>
+      <option name="number" value="00025" />
+      <option name="presentableId" value="LOCAL-00025" />
+      <option name="project" value="LOCAL" />
+      <updated>1755856845947</updated>
+    </task>
+    <option name="localTasksCounter" value="26" />
     <servers />
   </component>
   <component name="VcsManagerConfiguration">
