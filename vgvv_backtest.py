@@ -22,8 +22,8 @@ warnings.filterwarnings('ignore')
 import os
 os.environ.setdefault('CVXPY_SUPPRESS_WARNINGS','1')
 
-from pricing_models import BlackScholesFX
-from smile_replication import build_and_calibrate_smile, TENOR_DAYS
+from pricing_models import BlackScholesFX, VGVVModel
+from smile_replication import build_and_calibrate_smile, TENOR_DAYS, build_delta_vol_dict, interpolate_vol
 from rates import get_domestic_foreign_rates, ensure_rates
 from trading_strategy import EnhancedVolatilityArbitrageStrategy, ENHANCED_CONFIG
 from tearsheet import save_tearsheet  # NEW
@@ -68,13 +68,16 @@ class VGVVTrade:
     last_mark: float = 0.0
     hedge_last_mark: float = 0.0
     hedge_entry_spot: float = 0.0
+    entry_cost: float = 0.0
 
 class VGVVSmileBacktester:
     def __init__(self, loader, pairs: List[str], start_date, end_date,
                  initial_capital=10_000_000, vol_edge_threshold=0.005,
                  bid_ask=0.001, commission=0.0005, slippage=0.0002,
                  margin_rate=0.20, daily_capital_fraction=0.10,
-                 max_notional=2_500_000, allocation_mode='return', seed=42):
+                 max_notional=2_500_000, allocation_mode='return', seed=42,
+                 use_moneyness_cost: bool = False,
+                 bid_ask_wing_mult: float = 1.5):
         # Auto-discover pairs if 'ALL' passed
         if pairs is None or (isinstance(pairs, list) and len(pairs)==1 and pairs[0].upper()=='ALL'):
             fx_dir = Path('data/FX')
@@ -93,7 +96,13 @@ class VGVVSmileBacktester:
         self.initial_capital = initial_capital
         self.equity = initial_capital
         self.vol_edge_threshold = vol_edge_threshold
+        # Store components to allow moneyness-aware bid/ask
+        self.bid_ask = bid_ask
+        self.commission = commission
+        self.slippage = slippage
         self.cost_rate = bid_ask + commission + slippage
+        self.use_moneyness_cost = use_moneyness_cost
+        self.bid_ask_wing_mult = bid_ask_wing_mult
         self.margin_rate = margin_rate
         self.daily_capital_fraction = daily_capital_fraction
         self.max_notional = max_notional
@@ -126,6 +135,16 @@ class VGVVSmileBacktester:
             return self.bs.delta(spot, strike, r_d, r_f, vol, T, opt_type)
         except Exception:
             return 0.0
+
+    def _effective_cost_rate(self, delta: float) -> float:
+        """Optional moneyness-aware transaction cost (disabled by default).
+        Scales bid/ask with |delta-0.5|; commission & slippage flat.
+        """
+        if not self.use_moneyness_cost or delta is None or not np.isfinite(delta):
+            return self.cost_rate
+        wing_factor = min(1.0, max(0.0, 2.0 * abs(float(delta) - 0.5)))
+        ba = self.bid_ask * (1.0 + self.bid_ask_wing_mult * wing_factor)
+        return ba + self.commission + self.slippage
 
     def _optimize_weights(self, current_date):
         # Run at year end
@@ -204,7 +223,10 @@ class VGVVSmileBacktester:
         notional = per_trade_capital / price
         notional = min(notional, self.max_notional)
         premium = price * notional
-        premium_net = premium * (1 - self.cost_rate)
+        # Use moneyness-aware cost if enabled
+        eff_cost_rate = self._effective_cost_rate(getattr(sp, 'delta', np.nan))
+        premium_net = premium * (1 - eff_cost_rate)
+        entry_cost = premium * eff_cost_rate
         margin = cand['spot'] * notional * self.margin_rate
         if self.margin_used + margin > self.equity * 0.8:
             return None
@@ -231,7 +253,8 @@ class VGVVSmileBacktester:
             forward=cand['forward'],
             premium_net_received=premium_net,
             last_mark=(-1) * notional * price,
-            hedge_last_mark=0.0
+            hedge_last_mark=0.0,
+            entry_cost=entry_cost
         )
         self.open_trades.append(tr)
         self.trade_counter += 1
@@ -259,6 +282,11 @@ class VGVVSmileBacktester:
                 pnl_realized += tr.hedge_size * (spot - tr.hedge_entry_spot) - tr.hedge_cost
             tr.exit_price = intrinsic
             tr.pnl = pnl_realized
+            # Release margin at expiry
+            try:
+                self.margin_used -= tr.spot_entry * tr.notional * self.margin_rate
+            except Exception:
+                pass
             return pnl_realized
         return 0.0
 
@@ -270,7 +298,14 @@ class VGVVSmileBacktester:
             if not vol_data: continue
             T = max((tr.expiry_date - date).days,1)/365
             try:
-                g = self.bs.calculate_greeks(tr.strike, int(T*365), tr.entry_vol, vol_data.spot, tr.domestic_rate, tr.foreign_rate, tr.option_type)
+                atm = vol_data.atm_vols.get(tr.tenor)
+                rr25 = vol_data.rr_25d.get(tr.tenor,0.0)
+                bf25 = vol_data.bf_25d.get(tr.tenor,0.0)
+                rr10 = vol_data.rr_10d.get(tr.tenor,0.0)
+                bf10 = vol_data.bf_10d.get(tr.tenor,0.0)
+                dvols = build_delta_vol_dict(atm, rr25, bf25, rr10, bf10)
+                vol_now = interpolate_vol(dvols, tr.delta)
+                g = self.bs.calculate_greeks(tr.strike, int(T*365), vol_now, vol_data.spot, tr.domestic_rate, tr.foreign_rate, tr.option_type)
                 total_delta += g['delta'] * tr.direction * tr.notional * vol_data.spot
                 total_gamma += g['gamma'] * tr.direction * tr.notional * vol_data.spot
                 total_vega  += g['vega']  * tr.direction * tr.notional
@@ -286,36 +321,68 @@ class VGVVSmileBacktester:
         for date in self.business_days:
             self._optimize_weights(date)
             day_mtm_pnl = 0.0
-            # MTM existing trades
+            day_pnl_by_tenor = defaultdict(float)
+            # MTM existing trades with current market vol; daily re-hedge
             for tr in list(self.open_trades):
                 vd = self.loader.get_volatility_surface(tr.pair, date)
                 if not vd: continue
                 spot = vd.spot
                 expired = date >= tr.expiry_date
+                atm = vd.atm_vols.get(tr.tenor)
+                rr25 = vd.rr_25d.get(tr.tenor,0.0)
+                bf25 = vd.bf_25d.get(tr.tenor,0.0)
+                rr10 = vd.rr_10d.get(tr.tenor,0.0)
+                bf10 = vd.bf_10d.get(tr.tenor,0.0)
+                dvols = build_delta_vol_dict(atm, rr25, bf25, rr10, bf10)
+                vol_now = interpolate_vol(dvols, tr.delta)
                 if not expired:
                     T = max((tr.expiry_date - date).days,1)/365
                     try:
-                        price_now = self.bs.price(tr.strike, int(T*365), tr.entry_vol, spot, tr.domestic_rate, tr.foreign_rate, tr.option_type)
+                        price_now = self.bs.price(tr.strike, int(T*365), vol_now, spot, tr.domestic_rate, tr.foreign_rate, tr.option_type)
                     except Exception:
                         price_now = max((spot-tr.strike) if tr.option_type=='call' else (tr.strike-spot),0)
                 else:
                     price_now = max((spot-tr.strike) if tr.option_type=='call' else (tr.strike-spot),0)
                 current_mark = tr.direction * tr.notional * price_now
-                delta_pnl = tr.last_mark - current_mark
+                delta_pnl = current_mark - tr.last_mark
                 day_mtm_pnl += delta_pnl
+                day_pnl_by_tenor[tr.tenor] += delta_pnl
                 tr.last_mark = current_mark
+                # Hedge MTM
                 if tr.hedged:
                     hedge_mark = tr.hedge_size * spot
                     hedge_delta = hedge_mark - tr.hedge_last_mark
                     day_mtm_pnl += hedge_delta
+                    day_pnl_by_tenor[tr.tenor] += hedge_delta
                     tr.hedge_last_mark = hedge_mark
+                    # Hedge carry cost/income
+                    carry = tr.hedge_size * spot * (tr.domestic_rate - tr.foreign_rate) / 252.0
+                    self.equity += carry
+                    day_pnl_by_tenor[tr.tenor] += carry
+                # Daily re-hedge to |delta|<=4%
+                if not expired:
+                    T = max((tr.expiry_date - date).days,1)/365
+                    try:
+                        d_now = self.bs.delta(spot, tr.strike, tr.domestic_rate, tr.foreign_rate, vol_now, T, tr.option_type)
+                    except Exception:
+                        d_now = 0.0
+                    if abs(d_now) > 0.04:
+                        desired_units = -d_now * tr.notional * tr.direction
+                        dH = desired_units - tr.hedge_size
+                        if abs(dH) > 1e-12:
+                            cost = abs(dH) * spot * 0.0001
+                            self.equity -= cost
+                            day_pnl_by_tenor[tr.tenor] -= cost
+                            tr.hedged = True
+                            tr.hedge_size += dH
+                            tr.hedge_cost += cost
+                            tr.hedge_last_mark += dH * spot
+                            tr.hedge_entry_spot = spot if tr.hedge_entry_spot == 0.0 else tr.hedge_entry_spot
                 if expired:
-                    # Compute realized for report
                     self._value_trade(tr, date, spot)
                     self.open_trades.remove(tr)
                     self.closed_trades.append(tr)
             self.equity += day_mtm_pnl
-            spot_cache = {}
             # Open new trades
             if len(self.open_trades) < 300:
                 for tenor in TENORS:
@@ -333,15 +400,28 @@ class VGVVSmileBacktester:
                         fwd = vd.forwards.get(tenor, vd.spot)
                         smile = build_and_calibrate_smile(pair, date, tenor, vd.spot, fwd, atm, rr25, bf25, rr10, bf10)
                         if not smile: continue
+                        # Calibrate VGVV model to the reconstructed smile
+                        T = TENOR_DAYS[tenor]/365
+                        r_d, r_f = get_domestic_foreign_rates(date, T, vd.spot, fwd)
+                        try:
+                            vg = VGVVModel(vd.spot, fwd, r_d, r_f, T)
+                            k_arr = np.array([pt.strike for pt in smile.points], dtype=float)
+                            mv_arr = np.array([pt.market_vol for pt in smile.points], dtype=float)
+                            params_vg = vg.calibrate(k_arr, mv_arr)
+                        except Exception:
+                            vg = None; params_vg = None
                         for p in smile.points:
-                            model_vol = self.strategy.ultra_enhanced_vgvv_model(
-                                p.market_vol, rr25, bf25, rr10, bf10, vd.spot, fwd, TENOR_DAYS[tenor]/365
-                            )
-                            edge = p.market_vol - model_vol
+                            try:
+                                if vg and params_vg:
+                                    model_vol = vg.vgvv_vol(p.strike, params_vg)
+                                else:
+                                    # Fallback to conservative heuristic if calibration failed
+                                    model_vol = max(p.market_vol * 0.9, 0.0001)
+                                edge = p.market_vol - model_vol
+                            except Exception:
+                                continue
                             if edge > self.vol_edge_threshold:
                                 opt_type = 'call' if p.delta >= 0.5 else 'put'
-                                T = TENOR_DAYS[tenor]/365
-                                r_d, r_f = get_domestic_foreign_rates(date, T, vd.spot, fwd)
                                 class _Point: pass
                                 pt = _Point(); pt.delta=p.delta; pt.strike=p.strike; pt.market_vol=p.market_vol; pt.model_vol=model_vol; pt.vol_edge=edge
                                 cands.append({'pair':pair,'tenor':tenor,'point':pt,'spot':vd.spot,'forward':fwd,'type':opt_type,'r_d':r_d,'r_f':r_f})
@@ -350,11 +430,33 @@ class VGVVSmileBacktester:
                     for cd in cands[:3]:
                         tr = self._open_trade(cd, date, tenor_cap)
                         if tr:
+                            # Credit net premium at entry and attribute to tenor
                             self.equity += tr.premium_net_received
-                            self._hedge(tr, cd['spot'])
+                            day_pnl_by_tenor[tr.tenor] += tr.premium_net_received
             else:
                 for tenor in TENORS:
                     self.tenor_capital_history[tenor].append(self.initial_capital * self.tenor_weights[tenor])
+            # Margin financing cost allocated by tenor; recompute margin used from open trades
+            margin_by_tenor = defaultdict(float)
+            total_margin = 0.0
+            # Use current spot for margin requirement approximation
+            for tr in self.open_trades:
+                vd = self.loader.get_volatility_surface(tr.pair, date)
+                cur_spot = vd.spot if vd else tr.spot_entry
+                m = cur_spot * tr.notional * self.margin_rate
+                margin_by_tenor[tr.tenor] += m
+                total_margin += m
+            self.margin_used = total_margin
+            if total_margin > 0:
+                from rates import get_rate
+                fin_rate = get_rate(date, 1/12)
+                fin_cost_total = - total_margin * fin_rate / 252.0
+                self.equity += fin_cost_total
+                for t, m in margin_by_tenor.items():
+                    day_pnl_by_tenor[t] += fin_cost_total * (m/total_margin)
+            # Record per-tenor daily PnL
+            for t in TENORS:
+                self.tenor_daily_pnl[t].append(day_pnl_by_tenor.get(t, 0.0))
             g = self._greeks(date)
             theta_pnl_est = g.get('theta',0.0)
             self.daily_theta_est.append({'date':date,'theta_pnl_est':theta_pnl_est})

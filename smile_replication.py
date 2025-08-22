@@ -129,7 +129,7 @@ def interpolate_vol(delta_vols: Dict[float,float], target_delta: float) -> float
     return delta_vols[ds[-1]]
 
 
-def calibrate_sabr(forward: float, T: float, strikes: List[float], vols: List[float]) -> Tuple[Dict[str,float], List[float]]:
+def calibrate_sabr(forward: float, T: float, strikes: List[float], vols: List[float], weights: Optional[List[float]] = None) -> Tuple[Dict[str,float], List[float]]:
     strikes_arr = np.array(strikes, dtype=float)
     vols_arr = np.array(vols, dtype=float)
     mask = np.isfinite(vols_arr) & (vols_arr>0)
@@ -137,7 +137,14 @@ def calibrate_sabr(forward: float, T: float, strikes: List[float], vols: List[fl
         return {'alpha':np.nan,'beta':0.5,'rho':0,'nu':0}, [np.nan]*len(strikes)
     try:
         model = SABRModelQL(forward, T)
-        params = model.calibrate(strikes_arr[mask], vols_arr[mask], beta=0.5)
+        if weights is None:
+            w = np.ones_like(vols_arr)
+        else:
+            w = np.array(weights, dtype=float)
+            if w.shape[0] != vols_arr.shape[0]:
+                w = np.ones_like(vols_arr)
+        # Only pass weights for valid points
+        params = model.calibrate(strikes_arr[mask], vols_arr[mask], beta=0.5, weights=w[mask])
         sabr_vols = [model.sabr_vol(k, params['alpha'], params['beta'], params['rho'], params['nu']) for k in strikes]
         return params, sabr_vols
     except Exception:
@@ -169,7 +176,16 @@ def build_and_calibrate_smile(pair: str, date: pd.Timestamp, tenor: str, spot: f
         k = delta_to_strike(forward, vol, T, d)
         strikes.append(k)
         market_vols.append(vol)
-    params, sabr_vols = calibrate_sabr(forward, T, strikes, market_vols)
+    # Heavier weight to ATM and 25D points, lighter to 10D wings
+    weights = []
+    for d in TARGET_DELTAS:
+        if abs(d-0.50) < 1e-6:
+            weights.append(3.0)
+        elif abs(d-0.25) < 1e-6 or abs(d-0.75) < 1e-6:
+            weights.append(2.0)
+        else:
+            weights.append(1.0)
+    params, sabr_vols = calibrate_sabr(forward, T, strikes, market_vols, weights)
     points = []
     for d, k, mv, sv in zip(TARGET_DELTAS, strikes, market_vols, sabr_vols):
         edge = mv - sv if (sv is not None and np.isfinite(sv)) else np.nan
@@ -185,4 +201,3 @@ def extract_overpriced_options(smile: CalibratedSmile, min_edge: float=0.005) ->
     # sort by edge desc
     candidates.sort(key=lambda x: x.vol_edge if x.vol_edge is not None else -1, reverse=True)
     return candidates
-

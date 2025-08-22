@@ -15,7 +15,8 @@ Assumptions:
  - Margin: 20% spot * notional for shorts (released at expiry).
  - Hedge: If |option delta| > 4% on entry day we hedge to neutral using spot at 1bp cost of hedge notionally.
  - Notional sizing: Per tenor capital = initial_capital * weight_t. Each day allocate daily_capital_fraction (10%) of that to new trades, split equally among up to 3 options selected.
- - P&L recognized at expiry (premium treated as liability until then) -> clearer theta attribution.
+ - Premium is credited immediately at entry; positions are fully MTM daily; margin released at expiry.
+ - Hedge financing: daily carry on hedge exposure approximated by (r_d - r_f)/252 applied to spot hedge PV.
  - No early exercise / close outs. Expired options settle intrinsic.
  - Foreign rate inferred from forward via covered interest parity.
 
@@ -40,7 +41,7 @@ import os
 os.environ.setdefault('CVXPY_SUPPRESS_WARNINGS','1')
 
 from pricing_models import BlackScholesFX
-from smile_replication import build_and_calibrate_smile, extract_overpriced_options, TENOR_DAYS
+from smile_replication import build_and_calibrate_smile, extract_overpriced_options, TENOR_DAYS, build_delta_vol_dict, interpolate_vol
 from rates import get_domestic_foreign_rates, ensure_rates
 from tearsheet import save_tearsheet
 
@@ -84,6 +85,7 @@ class OptionTrade:
     last_mark: float = 0.0   # direction * notional * last option price
     hedge_last_mark: float = 0.0  # hedge_size * last spot
     hedge_entry_spot: float = 0.0  # spot when hedge was placed
+    entry_cost: float = 0.0  # premium * cost_rate at entry
 
 class SABRSmileBacktester:
     def __init__(self, loader, pairs: List[str], start_date, end_date,
@@ -95,7 +97,9 @@ class SABRSmileBacktester:
                  margin_rate: float = 0.20,
                  daily_capital_fraction: float = 0.10,
                  max_notional: float = 2_500_000.0,
-                 allocation_mode: str = 'return', seed: int = 42):
+                 allocation_mode: str = 'return', seed: int = 42,
+                 use_moneyness_cost: bool = False,
+                 bid_ask_wing_mult: float = 1.5):
         # Auto-discover pairs if 'ALL'
         if pairs is None or (isinstance(pairs, list) and len(pairs)==1 and pairs[0].upper()=='ALL'):
             fx_dir = Path('data/FX')
@@ -113,7 +117,13 @@ class SABRSmileBacktester:
         self.initial_capital = initial_capital
         self.equity = initial_capital
         self.min_vol_edge = min_vol_edge
+        # Store components so we can vary bid/ask with moneyness if desired
+        self.bid_ask = bid_ask
+        self.commission = commission
+        self.slippage = slippage
         self.cost_rate = bid_ask + commission + slippage
+        self.use_moneyness_cost = use_moneyness_cost
+        self.bid_ask_wing_mult = bid_ask_wing_mult
         self.margin_rate = margin_rate
         self.daily_capital_fraction = daily_capital_fraction
         self.max_notional = max_notional
@@ -214,6 +224,17 @@ class SABRSmileBacktester:
         except Exception:
             return 0.0
 
+    def _effective_cost_rate(self, delta: float) -> float:
+        """Optional moneyness-aware transaction cost.
+        In FX options, wings tend to have wider spreads than ATM. We scale bid/ask with |delta-0.5|.
+        wing_factor in [0,1]: 0 at 50d, ~1 at 10d/90d. Commission & slippage remain flat.
+        """
+        if not self.use_moneyness_cost or delta is None or not np.isfinite(delta):
+            return self.cost_rate
+        wing_factor = min(1.0, max(0.0, 2.0 * abs(float(delta) - 0.5)))
+        ba = self.bid_ask * (1.0 + self.bid_ask_wing_mult * wing_factor)
+        return ba + self.commission + self.slippage
+
     def _open_trade(self, cand, date, tenor_capital):
         sp = cand['smile_point']
         tenor = cand['tenor']
@@ -228,7 +249,10 @@ class SABRSmileBacktester:
         notional = per_trade_capital / price
         notional = min(notional, self.max_notional)
         premium = price * notional
-        premium_net = premium * (1 - self.cost_rate)
+        # Use moneyness-aware cost if enabled
+        eff_cost_rate = self._effective_cost_rate(getattr(sp, 'delta', np.nan))
+        premium_net = premium * (1 - eff_cost_rate)
+        entry_cost = premium * eff_cost_rate
         margin = cand['spot'] * notional * self.margin_rate
         if self.margin_used + margin > self.equity * 0.8:
             return None
@@ -255,13 +279,15 @@ class SABRSmileBacktester:
             forward=cand['forward'],
             premium_net_received=premium_net,
             last_mark=(-1) * notional * price,  # direction is -1
-            hedge_last_mark=0.0
+            hedge_last_mark=0.0,
+            entry_cost=entry_cost
         )
         self.open_trades.append(trade)
         self.trade_counter += 1
         return trade
 
-    def _hedge(self, trade: OptionTrade, spot: float):
+    def _hedge(self, trade: OptionTrade, spot: float) -> float:
+        """Place entry-day delta hedge if |delta|>4%. Returns cost incurred (negative PnL)."""
         T = max((trade.expiry_date - trade.entry_date).days,1)/365
         d = self._delta(spot, trade.strike, T, trade.entry_vol, trade.domestic_rate, trade.foreign_rate, trade.option_type)
         if abs(d) > 0.04 and not trade.hedged:
@@ -273,6 +299,8 @@ class SABRSmileBacktester:
             trade.hedge_cost = cost
             trade.hedge_last_mark = trade.hedge_size * spot
             trade.hedge_entry_spot = spot
+            return -cost  # negative PnL on the day
+        return 0.0
 
     def _value_trade(self, trade: OptionTrade, date: pd.Timestamp, spot: float):
         if date >= trade.expiry_date:
@@ -283,6 +311,11 @@ class SABRSmileBacktester:
                 pnl_realized += trade.hedge_size * (spot - trade.hedge_entry_spot) - trade.hedge_cost
             trade.exit_price = intrinsic
             trade.pnl = pnl_realized
+            # Release margin on expiry so capacity frees up
+            try:
+                self.margin_used -= trade.spot_entry * trade.notional * self.margin_rate
+            except Exception:
+                pass
             return pnl_realized
         return 0.0
 
@@ -295,8 +328,16 @@ class SABRSmileBacktester:
             if not vol_data:
                 continue
             T = max((tr.expiry_date - date).days,1)/365
+            # Use current market vol at the trade's delta for greeks
             try:
-                g = self.bs.calculate_greeks(tr.strike, int(T*365), tr.entry_vol, vol_data.spot, tr.domestic_rate, tr.foreign_rate, tr.option_type)
+                atm = vol_data.atm_vols.get(tr.tenor)
+                rr25 = vol_data.rr_25d.get(tr.tenor,0.0)
+                bf25 = vol_data.bf_25d.get(tr.tenor,0.0)
+                rr10 = vol_data.rr_10d.get(tr.tenor,0.0)
+                bf10 = vol_data.bf_10d.get(tr.tenor,0.0)
+                dvols = build_delta_vol_dict(atm, rr25, bf25, rr10, bf10)
+                vol_now = interpolate_vol(dvols, tr.delta)
+                g = self.bs.calculate_greeks(tr.strike, int(T*365), vol_now, vol_data.spot, tr.domestic_rate, tr.foreign_rate, tr.option_type)
                 total_delta += g['delta'] * tr.direction * tr.notional * vol_data.spot
                 total_gamma += g['gamma'] * tr.direction * tr.notional * vol_data.spot
                 total_vega  += g['vega']  * tr.direction * tr.notional
@@ -310,12 +351,12 @@ class SABRSmileBacktester:
         ensure_rates()
         print(f"\n=== SABR Backtest ({self.allocation_mode}) ===")
         print(f"Period: {self.start_date.date()} -> {self.end_date.date()}  Pairs: {', '.join(self.pairs)}")
-        realized_equity_base = self.initial_capital  # dynamic equity base including realized premium & MTM deltas
         for date in self.business_days:
             self._rebalance(date)
             day_mtm_pnl = 0.0
+            day_pnl_by_tenor = defaultdict(float)
             spot_cache = {}
-            # Mark-to-market existing positions
+            # Mark-to-market existing positions with current market vol and re-hedge daily
             for tr in list(self.open_trades):
                 vd = self.loader.get_volatility_surface(tr.pair, date)
                 if not vd:
@@ -323,26 +364,59 @@ class SABRSmileBacktester:
                 spot = vd.spot
                 spot_cache[tr.pair] = spot
                 expired = date >= tr.expiry_date
+                # Determine current market vol for this trade's delta/tenor
+                atm = vd.atm_vols.get(tr.tenor)
+                rr25 = vd.rr_25d.get(tr.tenor,0.0)
+                bf25 = vd.bf_25d.get(tr.tenor,0.0)
+                rr10 = vd.rr_10d.get(tr.tenor,0.0)
+                bf10 = vd.bf_10d.get(tr.tenor,0.0)
+                dvols = build_delta_vol_dict(atm, rr25, bf25, rr10, bf10)
+                vol_now = interpolate_vol(dvols, tr.delta)
                 if not expired:
                     T = max((tr.expiry_date - date).days,1)/365
                     try:
-                        price_now = self.bs.price(tr.strike, int(T*365), tr.entry_vol, spot, tr.domestic_rate, tr.foreign_rate, tr.option_type)
+                        price_now = self.bs.price(tr.strike, int(T*365), vol_now, spot, tr.domestic_rate, tr.foreign_rate, tr.option_type)
                     except Exception:
                         price_now = max((spot-tr.strike) if tr.option_type=='call' else (tr.strike-spot),0)
                 else:
                     price_now = max((spot-tr.strike) if tr.option_type=='call' else (tr.strike-spot),0)
-                current_mark = tr.direction * tr.notional * price_now  # negative for short
-                delta_pnl = tr.last_mark - current_mark
+                current_mark = tr.direction * tr.notional * price_now
+                delta_pnl = current_mark - tr.last_mark
                 day_mtm_pnl += delta_pnl
+                day_pnl_by_tenor[tr.tenor] += delta_pnl
                 tr.last_mark = current_mark
-                # Hedge MTM
+                # Hedge MTM first
                 if tr.hedged:
                     hedge_mark = tr.hedge_size * spot
                     hedge_delta_pnl = hedge_mark - tr.hedge_last_mark
                     day_mtm_pnl += hedge_delta_pnl
+                    day_pnl_by_tenor[tr.tenor] += hedge_delta_pnl
                     tr.hedge_last_mark = hedge_mark
+                    # Hedge carry cost/income
+                    carry = tr.hedge_size * spot * (tr.domestic_rate - tr.foreign_rate) / 252.0
+                    self.equity += carry
+                    day_pnl_by_tenor[tr.tenor] += carry
+                # Daily re-hedge to delta-neutral if |delta|>4%
+                if not expired:
+                    T = max((tr.expiry_date - date).days,1)/365
+                    try:
+                        d_now = self.bs.delta(spot, tr.strike, tr.domestic_rate, tr.foreign_rate, vol_now, T, tr.option_type)
+                    except Exception:
+                        d_now = 0.0
+                    if abs(d_now) > 0.04:
+                        desired_units = -d_now * tr.notional * tr.direction
+                        dH = desired_units - tr.hedge_size
+                        if abs(dH) > 1e-12:
+                            cost = abs(dH) * spot * 0.0001
+                            self.equity -= cost
+                            day_pnl_by_tenor[tr.tenor] -= cost
+                            # Update hedge position; adjust last_mark to include new units at current spot
+                            tr.hedged = True
+                            tr.hedge_size += dH
+                            tr.hedge_cost += cost
+                            tr.hedge_last_mark += dH * spot
+                            tr.hedge_entry_spot = spot if tr.hedge_entry_spot == 0.0 else tr.hedge_entry_spot
                 if expired:
-                    # Compute realized PnL for report
                     self._value_trade(tr, date, spot)
                     self.open_trades.remove(tr)
                     self.closed_trades.append(tr)
@@ -376,11 +450,30 @@ class SABRSmileBacktester:
                     for cd in cands[:3]:
                         tr = self._open_trade(cd, date, tenor_cap)
                         if tr:
-                            self.equity += tr.premium_net_received  # receive premium
-                            self._hedge(tr, cd['spot'])
+                            self.equity += tr.premium_net_received
+                            day_pnl_by_tenor[tr.tenor] += tr.premium_net_received
             else:
                 for tenor in TENORS:
                     self.tenor_capital_history[tenor].append(self.initial_capital * self.tenor_weights[tenor])
+            # Financing cost on margin used (allocate by tenor share of margin)
+            # Recompute margin used from open trades to be robust
+            margin_by_tenor = defaultdict(float)
+            total_margin = 0.0
+            for tr in self.open_trades:
+                m = tr.spot_entry * tr.notional * self.margin_rate
+                margin_by_tenor[tr.tenor] += m
+                total_margin += m
+            self.margin_used = total_margin
+            if total_margin > 0:
+                from rates import get_rate
+                fin_rate = get_rate(date, 1/12)
+                fin_cost_total = - total_margin * fin_rate / 252.0
+                self.equity += fin_cost_total
+                for t, m in margin_by_tenor.items():
+                    day_pnl_by_tenor[t] += fin_cost_total * (m/total_margin)
+            # Record per-tenor daily PnL
+            for t in TENORS:
+                self.tenor_daily_pnl[t].append(day_pnl_by_tenor.get(t, 0.0))
             g = self._portfolio_greeks(date)
             theta_est = g.get('theta',0.0)
             self.daily_theta_est.append({'date':date,'theta_pnl_est':theta_est})
@@ -432,7 +525,7 @@ class SABRSmileBacktester:
             if self.tenor_alloc_history:
                 wdf = pd.DataFrame(self.tenor_alloc_history).set_index('date'); wdf.plot(figsize=(12,5)); plt.title('SABR Tenor Weights'); plt.tight_layout(); plt.savefig(out_dir/'sabr_tenor_weights.png', dpi=200); plt.close()
             if self.daily_greeks:
-                gdf = pd.DataFrame(self.daily_greeks).set_index('date'); plt.figure(figsize=(12,6));
+                gdf = pd.DataFrame(self.daily_greeks).set_index('date'); plt.figure(figsize=(12,6))
                 for c in ['delta','gamma','vega','theta']:
                     if c in gdf.columns: plt.plot(gdf.index, gdf[c], label=c)
                 plt.legend(); plt.title(f'SABR Greeks ({self.allocation_mode})'); plt.tight_layout(); plt.savefig(out_dir/f'sabr_greeks{mode_suffix}.png', dpi=200); plt.close()

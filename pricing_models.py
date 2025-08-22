@@ -151,12 +151,12 @@ class BlackScholesFX(QuantLibPricingBase):
         option.setPricingEngine(self.engine)
 
         try:
-            # Use QuantLib's implied volatility solver
+            # Use QuantLib's implied volatility solver (positional args for compatibility)
             impl_vol = option.impliedVolatility(
                 price,
                 self.process,
-                accuracy=1e-6,
-                maxEvaluations=100
+                1e-6,
+                100
             )
             return impl_vol
         except:
@@ -287,38 +287,39 @@ class SABRModelQL(QuantLibPricingBase):
         self.expiry_time = float(T)  # Store as float for QuantLib
 
     def calibrate(self, strikes: np.ndarray, market_vols: np.ndarray,
-                  beta: float = 0.5) -> Dict:
-        """Calibrate SABR parameters using QuantLib"""
-
+                  beta: float = 0.5, weights: Optional[np.ndarray] = None) -> Dict:
+        """Calibrate SABR parameters using QuantLib with optional weights on squared errors."""
         # Convert to QuantLib arrays
         strikes_ql = [float(k) for k in strikes]
         vols_ql = [float(v) for v in market_vols]
+        if weights is None:
+            weights_arr = np.ones(len(vols_ql), dtype=float)
+        else:
+            weights_arr = np.asarray(weights, dtype=float)
+            if weights_arr.shape[0] != len(vols_ql):
+                weights_arr = np.ones(len(vols_ql), dtype=float)
 
         # Initial guess
         alpha = float(market_vols[len(market_vols)//2])  # ATM vol approximation
         nu = 0.3
         rho = 0.0
 
-        # QuantLib SABR calibration using optimizer
         def objective(params):
             alpha, rho, nu = params
-
             # Ensure valid parameters
             if alpha <= 0 or nu <= 0 or abs(rho) >= 1:
                 return 1e10
-
-            total_error = 0
-            for strike, market_vol in zip(strikes_ql, vols_ql):
-                try:
-                    model_vol = ql.sabrVolatility(
-                        strike, self.forward, self.expiry_time,
-                        alpha, beta, nu, rho
-                    )
-                    total_error += (model_vol - market_vol) ** 2
-                except:
-                    return 1e10
-
-            return total_error
+            try:
+                model_vols = []
+                for strike in strikes_ql:
+                    mv = ql.sabrVolatility(float(strike), self.forward, self.expiry_time,
+                                           float(alpha), float(beta), float(nu), float(rho))
+                    model_vols.append(float(mv))
+                model_vols = np.array(model_vols)
+                diffs = model_vols - np.array(vols_ql)
+                return float(np.sum(weights_arr * diffs * diffs))
+            except Exception:
+                return 1e10
 
         # Optimize
         result = minimize(
@@ -337,10 +338,10 @@ class SABRModelQL(QuantLibPricingBase):
             alpha, rho, nu = result.x
 
         return {
-            'alpha': alpha,
-            'beta': beta,
-            'rho': rho,
-            'nu': nu
+            'alpha': float(alpha),
+            'beta': float(beta),
+            'rho': float(rho),
+            'nu': float(nu)
         }
 
     def sabr_vol(self, K: float, alpha: float, beta: float,
@@ -548,6 +549,18 @@ class VGVVModel:
             'skew': skew,
             'smile': smile
         }
+
+    def vgvv_vol(self, K: float, params: Dict) -> float:
+        """Return the VGVV-adjusted volatility at strike K under calibrated params."""
+        sigma_atm = float(params['sigma_atm'])
+        rho = float(params['rho'])
+        volvol = float(params['volvol'])
+        log_m = np.log(float(K) / float(self.forward))
+        # Same variance adjustment as price_vanilla
+        variance_adjustment = 1.0
+        variance_adjustment += rho * volvol * log_m / np.sqrt(self.T)
+        variance_adjustment += 0.5 * (volvol**2) * (log_m**2 - sigma_atm**2 * self.T) / self.T
+        return float(np.clip(sigma_atm * np.sqrt(max(variance_adjustment, 0.01)), 1e-4, 5.0))
 
     def price_vanilla(self, K: float, params: Dict,
                      option_type: str = 'call') -> float:
