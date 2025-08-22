@@ -293,7 +293,7 @@ class SABRSmileBacktester:
             spot_entry=cand['spot'],
             forward=cand['forward'],
             premium_net_received=premium_net,
-            last_mark=(-1) * notional * price,  # direction is -1
+            last_mark=0.0,  # initialize at 0 to prevent double-counting entry premium
             hedge_last_mark=0.0,
             entry_cost=entry_cost
         )

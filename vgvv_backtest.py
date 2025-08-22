@@ -403,7 +403,7 @@ class VGVVSmileBacktester:
             # Open new trades
             if len(self.open_trades) < 300:
                 for tenor in TENORS:
-                    tenor_cap = self.initial_capital * self.tenor_weights[tenor]
+                    tenor_cap = self.equity * self.tenor_weights[tenor]
                     self.tenor_capital_history[tenor].append(tenor_cap)
                     cands = []
                     for pair in self.pairs:
@@ -452,7 +452,7 @@ class VGVVSmileBacktester:
                             new_trades_counter[tr.pair] += 1
             else:
                 for tenor in TENORS:
-                    self.tenor_capital_history[tenor].append(self.initial_capital * self.tenor_weights[tenor])
+                    self.tenor_capital_history[tenor].append(self.equity * self.tenor_weights[tenor])
             # Financing cost on margin used (allocate by tenor share of margin); recompute margin using current spot when available
             margin_by_tenor = defaultdict(float)
             total_margin = 0.0
@@ -486,6 +486,7 @@ class VGVVSmileBacktester:
             theta_est = g.get('theta',0.0)
             self.daily_theta_est.append({'date':date,'theta_pnl_est':theta_est})
             cap_util = (self.margin_used / (self.equity*0.8)) if self.equity>0 else 0.0
+            cap_util_initial = (self.margin_used / (self.initial_capital*0.8)) if self.initial_capital>0 else 0.0
             self.daily_greeks.append({'date':date, **g})
             self.daily_records.append({
                 'date':date,
@@ -494,6 +495,7 @@ class VGVVSmileBacktester:
                 'closed_trades':len(self.closed_trades),
                 'margin_used':self.margin_used,
                 'capacity_utilization': cap_util,
+                'capacity_utilization_initial': cap_util_initial,
                 'day_mtm_pnl':day_mtm_pnl,
                 'theta_pnl_est':theta_est,
                 **g
@@ -589,8 +591,10 @@ class VGVVSmileBacktester:
             # Capacity utilization
             if 'capacity_utilization' in df_daily.columns:
                 plt.figure(figsize=(12,3))
-                plt.plot(df_daily.index, df_daily['capacity_utilization'], color='slateblue')
-                plt.title('VGVV Capacity Utilization (Margin / 80% Equity)'); plt.ylabel('Utilization'); plt.tight_layout(); plt.savefig(out_dir/'vgvv_capacity_utilization.png', dpi=200); plt.close()
+                plt.plot(df_daily.index, df_daily['capacity_utilization'], color='slateblue', label='vs current equity')
+                if 'capacity_utilization_initial' in df_daily.columns:
+                    plt.plot(df_daily.index, df_daily['capacity_utilization_initial'], color='darkorange', alpha=0.8, label='vs initial equity')
+                plt.title('VGVV Capacity Utilization (Margin / 80% Equity)'); plt.ylabel('Utilization'); plt.legend(loc='upper right'); plt.tight_layout(); plt.savefig(out_dir/f"vgvv_capacity_utilization{suf}.png", dpi=200); plt.close()
             # Tenor weights
             if self.tenor_alloc_history:
                 wdf = pd.DataFrame(self.tenor_alloc_history).set_index('date'); wdf.plot(figsize=(12,5)); plt.title('VGVV Tenor Weights'); plt.tight_layout(); plt.savefig(out_dir/'vgvv_tenor_weights.png', dpi=200); plt.close()
