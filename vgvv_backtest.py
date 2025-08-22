@@ -73,7 +73,7 @@ class VGVVTrade:
 class VGVVSmileBacktester:
     def __init__(self, loader, pairs: List[str], start_date, end_date,
                  initial_capital=10_000_000, vol_edge_threshold=0.005,
-                 bid_ask=0.0015, commission=0.0005, slippage=0.0002,
+                 bid_ask=0.0005, commission=0.0005, slippage=0.0002,
                  margin_rate=0.20, daily_capital_fraction=0.10,
                  max_notional=2_500_000, allocation_mode='return', seed=42,
                  use_moneyness_cost: bool = False,
@@ -268,7 +268,7 @@ class VGVVSmileBacktester:
             spot_entry=cand['spot'],
             forward=cand['forward'],
             premium_net_received=premium_net,
-            last_mark=(-1) * notional * price,
+            last_mark=0.0,
             hedge_last_mark=0.0,
             entry_cost=entry_cost
         )
