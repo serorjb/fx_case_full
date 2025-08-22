@@ -49,6 +49,7 @@
     "Python.draft_2.executor": "Debug",
     "Python.main (1).executor": "Run",
     "Python.plot_equity.executor": "Run",
+    "Python.quick_smoke.executor": "Run",
     "Python.run_backtests.executor": "Run",
     "Python.run_strategy.executor": "Run",
     "Python.run_ultra_optimized.executor": "Run",
@@ -75,8 +76,8 @@
       <recent name="C:\Dev\fx_case_full\config" />
     </key>
   </component>
-  <component name="RunManager" selected="Python.temp_smoke">
-    <configuration name="draft" type="PythonConfigurationType" factoryName="Python" temporary="true" nameIsGenerated="true">
+  <component name="RunManager" selected="Python.vgvv_backtest">
+    <configuration name="quick_smoke" type="PythonConfigurationType" factoryName="Python" temporary="true" nameIsGenerated="true">
       <module name="fx_case_full" />
       <option name="ENV_FILES" value="" />
       <option name="INTERPRETER_OPTIONS" value="" />
@@ -89,7 +90,7 @@
       <option name="IS_MODULE_SDK" value="true" />
       <option name="ADD_CONTENT_ROOTS" value="true" />
       <option name="ADD_SOURCE_ROOTS" value="true" />
-      <option name="SCRIPT_NAME" value="$PROJECT_DIR$/draft.py" />
+      <option name="SCRIPT_NAME" value="$PROJECT_DIR$/quick_smoke.py" />
       <option name="PARAMETERS" value="" />
       <option name="SHOW_COMMAND_LINE" value="false" />
       <option name="EMULATE_TERMINAL" value="false" />
@@ -188,11 +189,11 @@
     </configuration>
     <recent_temporary>
       <list>
-        <item itemvalue="Python.temp_smoke" />
-        <item itemvalue="Python.temp" />
         <item itemvalue="Python.vgvv_backtest" />
         <item itemvalue="Python.sabr_backtest" />
-        <item itemvalue="Python.draft" />
+        <item itemvalue="Python.quick_smoke" />
+        <item itemvalue="Python.temp_smoke" />
+        <item itemvalue="Python.temp" />
       </list>
     </recent_temporary>
   </component>
@@ -349,7 +350,23 @@
       <option name="project" value="LOCAL" />
       <updated>1755827546585</updated>
     </task>
-    <option name="localTasksCounter" value="19" />
+    <task id="LOCAL-00019" summary="-">
+      <option name="closed" value="true" />
+      <created>1755839726974</created>
+      <option name="number" value="00019" />
+      <option name="presentableId" value="LOCAL-00019" />
+      <option name="project" value="LOCAL" />
+      <updated>1755839726975</updated>
+    </task>
+    <task id="LOCAL-00020" summary="-">
+      <option name="closed" value="true" />
+      <created>1755839743437</created>
+      <option name="number" value="00020" />
+      <option name="presentableId" value="LOCAL-00020" />
+      <option name="project" value="LOCAL" />
+      <updated>1755839743437</updated>
+    </task>
+    <option name="localTasksCounter" value="21" />
     <servers />
   </component>
   <component name="VcsManagerConfiguration">

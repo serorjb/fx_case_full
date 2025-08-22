@@ -73,11 +73,12 @@ class VGVVTrade:
 class VGVVSmileBacktester:
     def __init__(self, loader, pairs: List[str], start_date, end_date,
                  initial_capital=10_000_000, vol_edge_threshold=0.005,
-                 bid_ask=0.001, commission=0.0005, slippage=0.0002,
+                 bid_ask=0.0015, commission=0.0005, slippage=0.0002,
                  margin_rate=0.20, daily_capital_fraction=0.10,
                  max_notional=2_500_000, allocation_mode='return', seed=42,
                  use_moneyness_cost: bool = False,
-                 bid_ask_wing_mult: float = 1.5):
+                 bid_ask_wing_mult: float = 1.5,
+                 report_start_date: str | None = '2007-01-01'):
         # Auto-discover pairs if 'ALL' passed
         if pairs is None or (isinstance(pairs, list) and len(pairs)==1 and pairs[0].upper()=='ALL'):
             fx_dir = Path('data/FX')
@@ -123,6 +124,11 @@ class VGVVSmileBacktester:
         self.daily_records = []
         self.daily_greeks = []
         self.daily_theta_est = []
+        # Reporting window (burn-in)
+        self.report_start = pd.Timestamp(report_start_date) if report_start_date else self.start_date
+        # Per-pair distribution tracking
+        self.pair_daily_new = []
+        self.pair_daily_open = []
 
     def _price(self, spot, strike, T, vol, r_d, r_f, opt_type):
         try:
@@ -322,6 +328,7 @@ class VGVVSmileBacktester:
             self._optimize_weights(date)
             day_mtm_pnl = 0.0
             day_pnl_by_tenor = defaultdict(float)
+            new_trades_counter = defaultdict(int)
             # MTM existing trades with current market vol; daily re-hedge
             for tr in list(self.open_trades):
                 vd = self.loader.get_volatility_surface(tr.pair, date)
@@ -430,16 +437,15 @@ class VGVVSmileBacktester:
                     for cd in cands[:3]:
                         tr = self._open_trade(cd, date, tenor_cap)
                         if tr:
-                            # Credit net premium at entry and attribute to tenor
                             self.equity += tr.premium_net_received
                             day_pnl_by_tenor[tr.tenor] += tr.premium_net_received
+                            new_trades_counter[tr.pair] += 1
             else:
                 for tenor in TENORS:
                     self.tenor_capital_history[tenor].append(self.initial_capital * self.tenor_weights[tenor])
-            # Margin financing cost allocated by tenor; recompute margin used from open trades
+            # Financing cost on margin used (allocate by tenor share of margin); recompute margin using current spot when available
             margin_by_tenor = defaultdict(float)
             total_margin = 0.0
-            # Use current spot for margin requirement approximation
             for tr in self.open_trades:
                 vd = self.loader.get_volatility_surface(tr.pair, date)
                 cur_spot = vd.spot if vd else tr.spot_entry
@@ -457,11 +463,31 @@ class VGVVSmileBacktester:
             # Record per-tenor daily PnL
             for t in TENORS:
                 self.tenor_daily_pnl[t].append(day_pnl_by_tenor.get(t, 0.0))
+            # Per-pair daily logs
+            if new_trades_counter:
+                for p, n in new_trades_counter.items():
+                    self.pair_daily_new.append({'date': date, 'pair': p, 'new_trades': int(n)})
+            open_counter = defaultdict(int)
+            for tr in self.open_trades:
+                open_counter[tr.pair] += 1
+            for p, n in open_counter.items():
+                self.pair_daily_open.append({'date': date, 'pair': p, 'open_trades': int(n)})
             g = self._greeks(date)
-            theta_pnl_est = g.get('theta',0.0)
-            self.daily_theta_est.append({'date':date,'theta_pnl_est':theta_pnl_est})
+            theta_est = g.get('theta',0.0)
+            self.daily_theta_est.append({'date':date,'theta_pnl_est':theta_est})
+            cap_util = (self.margin_used / (self.equity*0.8)) if self.equity>0 else 0.0
             self.daily_greeks.append({'date':date, **g})
-            self.daily_records.append({'date':date,'equity':self.equity,'open_trades':len(self.open_trades),'closed_trades':len(self.closed_trades),'margin_used':self.margin_used,'day_mtm_pnl':day_mtm_pnl,'theta_pnl_est':theta_pnl_est, **g})
+            self.daily_records.append({
+                'date':date,
+                'equity':self.equity,
+                'open_trades':len(self.open_trades),
+                'closed_trades':len(self.closed_trades),
+                'margin_used':self.margin_used,
+                'capacity_utilization': cap_util,
+                'day_mtm_pnl':day_mtm_pnl,
+                'theta_pnl_est':theta_est,
+                **g
+            })
             if (len(self.daily_records)%250==0) or date==self.business_days[-1]:
                 ret=(self.equity-self.initial_capital)/self.initial_capital
                 print(f"  {date.date()} | Eq ${self.equity/1e6:.2f}M Ret {ret:+.1%} Open {len(self.open_trades)} Closed {len(self.closed_trades)}")
@@ -470,15 +496,40 @@ class VGVVSmileBacktester:
     def _finalize(self):
         df_daily = pd.DataFrame(self.daily_records).set_index('date')
         trades_df = pd.DataFrame(t.__dict__ for t in self.closed_trades)
-        eq = df_daily['equity'].values
-        rets = np.diff(eq)/eq[:-1] if len(eq)>1 else np.array([])
-        tot_ret = (eq[-1]-eq[0])/eq[0] if len(eq)>1 else 0
-        ann_ret = (1+tot_ret)**(252/len(rets))-1 if len(rets)>0 else 0
-        ann_vol = rets.std()*np.sqrt(252) if rets.std()>0 else 0
-        sharpe = ann_ret/ann_vol if ann_vol>0 else 0
-        peak = np.maximum.accumulate(eq) if len(eq)>0 else np.array([])
-        dd = (eq-peak)/peak if len(eq)>0 else np.array([])
-        max_dd = dd.min() if len(dd)>0 else 0
+        # Adjusted equity rebased at report_start
+        eq = df_daily['equity'].copy()
+        eq_vals = np.array([])
+        if not eq.empty:
+            pre = eq[eq.index < self.report_start]
+            base = pre.iloc[-1] if len(pre)>0 else (eq.iloc[0] if len(eq)>0 else self.initial_capital)
+            adj = eq.copy()
+            adj.loc[adj.index >= self.report_start] = self.initial_capital + (eq.loc[eq.index >= self.report_start] - base)
+            adj.loc[adj.index < self.report_start] = np.nan
+            df_daily['equity_adjusted'] = adj
+            post = adj.dropna()
+            eq_vals = post.values
+            rets = np.diff(eq_vals)/eq_vals[:-1] if len(eq_vals)>1 else np.array([])
+        else:
+            df_daily['equity_adjusted'] = eq
+            rets = np.array([])
+        # Drawdown on adjusted equity
+        if 'equity_adjusted' in df_daily.columns and df_daily['equity_adjusted'].notna().any():
+            adj_series = df_daily['equity_adjusted']
+            roll_peak = adj_series.cummax()
+            df_daily['drawdown'] = (adj_series - roll_peak) / roll_peak
+        else:
+            df_daily['drawdown'] = np.nan
+        if len(rets)>0:
+            tot_ret = (eq_vals[-1]-eq_vals[0])/eq_vals[0]
+            ann_ret = (1+tot_ret)**(252/len(rets))-1
+            ann_vol = rets.std()*np.sqrt(252)
+            sharpe = ann_ret/ann_vol if ann_vol>0 else 0
+            peak = np.maximum.accumulate(eq_vals)
+            dd = (eq_vals-peak)/peak
+            max_dd = dd.min() if len(dd)>0 else 0
+        else:
+            tot_ret=ann_ret=ann_vol=sharpe=max_dd=0.0
+        # Tenor perf unchanged
         tenor_perf=[]
         for t in TENORS:
             pnl_series = pd.Series(self.tenor_daily_pnl.get(t,[]))
@@ -497,35 +548,71 @@ class VGVVSmileBacktester:
         df_daily.to_csv(out_dir/f'vgvv_daily_equity{suf}.csv')
         trades_df.to_csv(out_dir/f'vgvv_trades{suf}.csv', index=False)
         tenor_perf_df.to_csv(out_dir/f'vgvv_tenor_performance{suf}.csv', index=False)
+        # Save per-pair distributions
+        if self.pair_daily_new:
+            pd.DataFrame(self.pair_daily_new).to_csv(out_dir/f'vgvv_pair_new_trades{suf}.csv', index=False)
+        if self.pair_daily_open:
+            pd.DataFrame(self.pair_daily_open).to_csv(out_dir/f'vgvv_pair_open_trades{suf}.csv', index=False)
         if self.daily_greeks:
             pd.DataFrame(self.daily_greeks).to_csv(out_dir/f'vgvv_greeks{suf}.csv', index=False)
         if self.daily_theta_est:
             pd.DataFrame(self.daily_theta_est).to_csv(out_dir/f'vgvv_theta_pnl{suf}.csv', index=False)
-        # Tearsheets
+        # Tearsheets & plots
         try:
-            save_tearsheet(df_daily['equity'], f'VGVV ({self.allocation_mode})', str(out_dir / 'tearsheets' / f'vgvv_{self.allocation_mode}.png'))
-        except Exception:
-            pass
-        # Plots
-        try:
-            plt.figure(figsize=(12,5)); plt.plot(df_daily.index, df_daily['equity']/1e6); plt.title('VGVV Equity Curve'); plt.ylabel('Equity (MM)'); plt.tight_layout(); plt.savefig(out_dir/'vgvv_equity_curve.png', dpi=200); plt.close()
+            try:
+                series_for_tearsheet = df_daily['equity_adjusted'].dropna() if 'equity_adjusted' in df_daily.columns else df_daily['equity']
+                save_tearsheet(series_for_tearsheet, f'VGVV ({self.allocation_mode})', str(out_dir / 'tearsheets' / f'vgvv_{self.allocation_mode}.png'))
+            except Exception:
+                pass
+            # Equity curve
+            plt.figure(figsize=(12,5))
+            if 'equity_adjusted' in df_daily.columns:
+                plt.plot(df_daily.index, df_daily['equity_adjusted']/1e6, label='Equity (Adj)')
+            else:
+                plt.plot(df_daily.index, df_daily['equity']/1e6, label='Equity')
+            plt.title('VGVV Equity Curve'); plt.ylabel('Equity (MM)'); plt.legend(); plt.tight_layout(); plt.savefig(out_dir/'vgvv_equity_curve.png', dpi=200); plt.close()
+            # Drawdown
+            if 'drawdown' in df_daily.columns and df_daily['drawdown'].notna().any():
+                plt.figure(figsize=(12,3))
+                plt.plot(df_daily.index, df_daily['drawdown'], color='firebrick')
+                plt.title('VGVV Drawdown (Adj)'); plt.ylabel('Drawdown'); plt.tight_layout(); plt.savefig(out_dir/'vgvv_drawdown.png', dpi=200); plt.close()
+            # Capacity utilization
+            if 'capacity_utilization' in df_daily.columns:
+                plt.figure(figsize=(12,3))
+                plt.plot(df_daily.index, df_daily['capacity_utilization'], color='slateblue')
+                plt.title('VGVV Capacity Utilization (Margin / 80% Equity)'); plt.ylabel('Utilization'); plt.tight_layout(); plt.savefig(out_dir/'vgvv_capacity_utilization.png', dpi=200); plt.close()
+            # Tenor weights
             if self.tenor_alloc_history:
                 wdf = pd.DataFrame(self.tenor_alloc_history).set_index('date'); wdf.plot(figsize=(12,5)); plt.title('VGVV Tenor Weights'); plt.tight_layout(); plt.savefig(out_dir/'vgvv_tenor_weights.png', dpi=200); plt.close()
+            # Greeks
             if self.daily_greeks:
-                gdf = pd.DataFrame(self.daily_greeks).set_index('date'); plt.figure(figsize=(12,6));
+                gdf = pd.DataFrame(self.daily_greeks).set_index('date'); plt.figure(figsize=(12,6))
                 for c in ['delta','gamma','vega','theta']:
                     if c in gdf.columns: plt.plot(gdf.index, gdf[c], label=c)
                 plt.legend(); plt.title(f'VGVV Greeks ({self.allocation_mode})'); plt.tight_layout(); plt.savefig(out_dir/f'vgvv_greeks{suf}.png', dpi=200); plt.close()
+            # Pair distributions over time
+            if self.pair_daily_open:
+                pdf = pd.DataFrame(self.pair_daily_open)
+                pivot_open = pdf.pivot_table(index='date', columns='pair', values='open_trades', aggfunc='sum').fillna(0)
+                pivot_open.plot(figsize=(12,6), lw=1)
+                plt.title('Open Trades by Pair Over Time'); plt.ylabel('Open Trades'); plt.tight_layout(); plt.savefig(out_dir/'vgvv_pair_open_timeseries.png', dpi=200); plt.close()
+            if self.pair_daily_new:
+                ndf = pd.DataFrame(self.pair_daily_new)
+                pivot_new = ndf.pivot_table(index='date', columns='pair', values='new_trades', aggfunc='sum').fillna(0)
+                pivot_new_7d = pivot_new.rolling(5, min_periods=1).sum()
+                pivot_new_7d.plot(figsize=(12,6), lw=1)
+                plt.title('New Trades by Pair (5-day rolling)'); plt.ylabel('New Trades'); plt.tight_layout(); plt.savefig(out_dir/'vgvv_pair_new_trades_timeseries.png', dpi=200); plt.close()
         except Exception:
             pass
         print(f"\n=== VGVV Summary ({self.allocation_mode}) ===")
-        print(f"Total Return: {tot_ret:+.1%} AnnReturn: {ann_ret:+.1%} Sharpe: {sharpe:.2f} MaxDD: {max_dd:.1%} Closed: {len(self.closed_trades)} FinalEq: ${self.equity:,.0f}")
+        final_eq_adj = float(df_daily['equity_adjusted'].dropna().iloc[-1]) if 'equity_adjusted' in df_daily.columns and not df_daily['equity_adjusted'].dropna().empty else self.equity
+        print(f"Total Return: {tot_ret:+.1%} AnnReturn: {ann_ret:+.1%} Sharpe: {sharpe:.2f} MaxDD: {max_dd:.1%} Closed: {len(self.closed_trades)} FinalEq: ${final_eq_adj:,.0f}")
         if not tenor_perf_df.empty:
             rows = tenor_perf_df.to_dict('records')
             print('Tenor Performance: '+', '.join(f"{r['tenor']}:{r['cum_pnl']:,.0f}" for r in rows))
         return {
             'initial_capital': self.initial_capital,
-            'final_equity': float(self.equity),
+            'final_equity': final_eq_adj,
             'total_return': float(tot_ret),
             'annualized_return': float(ann_ret),
             'annualized_volatility': float(ann_vol),
@@ -539,7 +626,8 @@ class VGVVSmileBacktester:
 if __name__ == '__main__':
     from data_loader import FXDataLoader
     ensure_rates()
-    loader = FXDataLoader(); loader.rf_curve.load_fred_data()
+    loader = FXDataLoader()
     pairs = ['ALL']
-    bt_r = VGVVSmileBacktester(loader, pairs, '2007-01-01','2024-12-31', allocation_mode='return'); bt_r.run()
-    bt_s = VGVVSmileBacktester(loader, pairs, '2007-01-01','2024-12-31', allocation_mode='sortino'); bt_s.run()
+    # Start 3 months earlier; report from 2007-01-01
+    bt_r = VGVVSmileBacktester(loader, pairs, '2006-09-01','2024-12-31', allocation_mode='return', report_start_date='2007-01-01'); bt_r.run()
+    bt_s = VGVVSmileBacktester(loader, pairs, '2006-09-01','2024-12-31', allocation_mode='sortino', report_start_date='2007-01-01'); bt_s.run()
