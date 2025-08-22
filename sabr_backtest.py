@@ -92,7 +92,7 @@ class SABRSmileBacktester:
     def __init__(self, loader, pairs: List[str], start_date, end_date,
                  initial_capital: float = 10_000_000.0,
                  min_vol_edge: float = 0.005,
-                 bid_ask: float = 0.0025,
+                 bid_ask: float = 0.0050,
                  commission: float = 0.0005,
                  slippage: float = 0.0002,
                  margin_rate: float = 0.20,

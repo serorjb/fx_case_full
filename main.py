@@ -9,7 +9,7 @@ def main():
     ensure_rates()
     loader = FXDataLoader()
     # pairs = ['EURUSD', 'USDJPY', 'XAUUSD', 'GBPUSD', 'USDCAD', 'USDCHF', 'NZDUSD']
-    pairs = list()
+    pairs = ['ALL']
     start = '2006-09-01'
     end = '2024-12-31'
 
