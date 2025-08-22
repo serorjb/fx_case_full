@@ -6,8 +6,6 @@
   <component name="ChangeListManager">
     <list default="true" id="637e7064-2d68-4de1-8449-ece28e37a35d" name="Changes" comment="-">
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/sabr_backtest.py" beforeDir="false" afterPath="$PROJECT_DIR$/sabr_backtest.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/vgvv_backtest.py" beforeDir="false" afterPath="$PROJECT_DIR$/vgvv_backtest.py" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -76,7 +74,7 @@
       <recent name="C:\Dev\fx_case_full\config" />
     </key>
   </component>
-  <component name="RunManager" selected="Python.temp_smoke">
+  <component name="RunManager" selected="Python.vgvv_backtest">
     <configuration name="quick_smoke" type="PythonConfigurationType" factoryName="Python" temporary="true" nameIsGenerated="true">
       <module name="fx_case_full" />
       <option name="ENV_FILES" value="" />
@@ -189,10 +187,10 @@
     </configuration>
     <recent_temporary>
       <list>
+        <item itemvalue="Python.vgvv_backtest" />
+        <item itemvalue="Python.sabr_backtest" />
         <item itemvalue="Python.temp_smoke" />
         <item itemvalue="Python.quick_smoke" />
-        <item itemvalue="Python.sabr_backtest" />
-        <item itemvalue="Python.vgvv_backtest" />
         <item itemvalue="Python.temp" />
       </list>
     </recent_temporary>
@@ -414,7 +412,15 @@
       <option name="project" value="LOCAL" />
       <updated>1755860698689</updated>
     </task>
-    <option name="localTasksCounter" value="27" />
+    <task id="LOCAL-00027" summary="-">
+      <option name="closed" value="true" />
+      <created>1755862223653</created>
+      <option name="number" value="00027" />
+      <option name="presentableId" value="LOCAL-00027" />
+      <option name="project" value="LOCAL" />
+      <updated>1755862223653</updated>
+    </task>
+    <option name="localTasksCounter" value="28" />
     <servers />
   </component>
   <component name="VcsManagerConfiguration">
